@@ -196,7 +196,7 @@ def render_gif(transcript: list[tuple[str, list[str]]], out: Path) -> None:
                 y = bubble(d, y, r, ls)  # 越界兜底 (内容较长时可能截断)
         if i == len(steps) - 1:
             d.rounded_rectangle([30, H - 64, W - 30, H - 18], radius=10, fill=PANEL)
-            d.text((46, H - 55), "github.com/<you>/plctap · write -> read -> interpret 闭环 · Modbus/FINS/MELSEC",
+            d.text((46, H - 55), "github.com/ymxc152/plctap · write -> read -> interpret 闭环 · Modbus/FINS/MELSEC",
                    font=f_body, fill=GREY)
         frames.append(img)
 
