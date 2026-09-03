@@ -62,7 +62,10 @@ class CheckResult(BaseModel):
 class ProbeResult(BaseModel):
     """probe_device 输出: 连通性探测 + 四类失败归因 (PLAN.md 第 3 节)。
 
-    reachable=True 时 failure_class 为 None, layer_hint 表示最深到达的层。
+    reachable 语义 = 传输层可达 (TCP 已建立)。设备回异常响应
+    (exception_response) 说明设备在线且协议栈正常, 此时 reachable=True,
+    failure_class/exception_code 给出应用层异常 —— 分层归因的锚点。
+    reachable=True 且 failure_class=None 表示可正常交换数据。
     """
 
     reachable: bool

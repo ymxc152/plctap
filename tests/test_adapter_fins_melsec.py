@@ -356,8 +356,10 @@ async def test_mc_probe_bad_frame_is_no_reply():
     adapter, pool, target = make_adapter(MelsecAdapter, host, port)
     try:
         r = await adapter.probe(target)
-        assert not r.reachable
-        assert r.failure_class in ("connected_but_no_reply", "exception_response")
+        if r.failure_class == "exception_response":
+            assert r.reachable  # P3 语义: 异常响应 = 设备在线
+        else:
+            assert not r.reachable
     finally:
         await pool.close_all()
         await server.stop()

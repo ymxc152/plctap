@@ -22,3 +22,7 @@ Thumbs.db
 .tmp/
 hangdiag.log
 issue-evidence/
+
+# eval 生成物 (可再生)
+eval/prompts.jsonl
+eval/results_baseline.json

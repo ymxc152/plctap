@@ -116,8 +116,9 @@ class ModbusAdapter(ProtocolAdapter):
             exc = next(
                 (f.value for f in parsed.fields if f.name == "exception_code"), None
             )
+            # reachable=传输层可达: 设备在线且回了规范异常帧 (P3 语义修正)
             return ProbeResult(
-                reachable=False,
+                reachable=True,
                 failure_class="exception_response",
                 exception_code=exc if isinstance(exc, int) else None,
                 layer_hint="application",

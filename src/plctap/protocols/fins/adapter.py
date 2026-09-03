@@ -149,7 +149,7 @@ class FinsAdapter(ProtocolAdapter):
         end_code = end_field.value
         if isinstance(end_code, int) and end_code != 0:
             return ProbeResult(
-                reachable=False,
+                reachable=True,
                 failure_class="exception_response",
                 exception_code=end_code,
                 layer_hint="application",

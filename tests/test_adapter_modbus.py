@@ -129,7 +129,7 @@ async def test_probe_exception_response(slave_factory):
     s = await slave_factory("exception")
     adapter, pool = make_adapter()
     r = await adapter.probe(make_target(s.port))
-    assert not r.reachable
+    assert r.reachable  # P3 语义: 设备在线且回规范异常帧 = 传输层可达
     assert r.failure_class == "exception_response"
     assert r.exception_code == 0x02
     assert r.layer_hint == "application"

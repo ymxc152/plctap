@@ -79,7 +79,8 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     ) -> ProbeResult:
         """测试能否连上 PLC 并通信, 失败时给出层级归因。
 
-        返回 reachable; 失败时 failure_class 取:
+        reachable = 传输层可达 (TCP 已建立; 设备回异常响应也算在线)。
+        failure_class 取:
         - connection_refused: 端口没人监听/网络不可达 (查网络与端口)
         - timeout: 连接超时 (查网络路由/防火墙)
         - connected_but_no_reply: TCP 通了但设备不回话 (查协议配置)
