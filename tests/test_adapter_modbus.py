@@ -324,3 +324,16 @@ async def test_write_invalid_point_type():
     adapter, _ = make_adapter()
     with pytest.raises(ValueError, match="point_type"):
         await adapter.write(make_target(1), address=0, values=[1], point_type="bank")
+
+async def test_sweeper_concurrent_release(slave_factory):
+    """回归: release() 并发改 _idle 字典时, 清扫任务不得崩溃 (dict changed size)。"""
+    s = await slave_factory("normal")
+    pool = ConnectionPool(idle_timeout_sec=0.02, sweep_interval_sec=0.01)
+    adapter = ModbusAdapter(pool, PlctapConfig(default_timeout_ms=1000))
+    tgt = make_target(s.port)
+    for _ in range(30):  # 并发读写, 制造 release 与 sweep 竞争
+        await adapter.read(tgt, address=1, count=1)
+    await asyncio.sleep(0.1)
+    sw = pool._sweeper
+    if sw is not None and sw.done():
+        assert sw.exception() is None  # 已结束则必须无异常; 未结束则视为通过

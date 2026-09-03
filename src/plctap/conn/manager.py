@@ -148,7 +148,7 @@ class ConnectionPool:
         while True:
             await asyncio.sleep(self.sweep_interval_sec)
             now = time.monotonic()
-            for key, idle in self._idle.items():
+            for key, idle in list(self._idle.items()):  # 快照迭代: release() 可能并发改字典
                 keep: list[PooledConnection] = []
                 for conn in idle:
                     if now - conn.last_used > self.idle_timeout_sec or conn.closed:
@@ -159,3 +159,4 @@ class ConnectionPool:
                     self._idle[key] = keep
                 else:
                     self._idle.pop(key, None)
+
