@@ -14,12 +14,15 @@ from plctap.conn.manager import ConnectionPool
 from plctap.models import (
     ByteOrder,
     CheckResult,
+    DiagnosticReport,
     ParseResult,
     ProbeResult,
     ReadResult,
     Target,
 )
 from plctap.protocols.base import adapter_for, known_protocols
+from plctap.protocols.fins.adapter import FinsAdapter  # noqa: F401  # 注册副作用
+from plctap.protocols.melsec.adapter import MelsecAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.modbus.adapter import ModbusAdapter  # noqa: F401  # 注册副作用
 from plctap.safety import AuditLog
 
@@ -98,28 +101,74 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         datatype: str | None = None,
         byteorder: ByteOrder = "big",
         function_code: int = 3,
+        area: str = "DM",
+        device: str = "D",
         timeout_ms: int | None = None,
     ) -> ReadResult:
         """从 PLC 读取数据区并按数据类型解释。
 
         Modbus: address 为 0 基寄存器地址 (口语"40001"对应 address=0);
-        count 为寄存器个数 (fc3=保持寄存器, fc4=输入寄存器);
+        count 为寄存器个数 (fc3=保持寄存器, fc4=输入寄存器)。
+        FINS: area 取 CIO/W/H/A/DM/EM, address 为字地址, count 为字数。
+        MELSEC: device 取 D/R/W (字软元件) 或 X/Y/B/M (位软元件, 每字
+        16 点), address 为起始编号, count 为点数。
         datatype 取 uint16/int16/float32, None 返回原始 16 位值;
-        byteorder 仅影响 float32 的寄存器对组合顺序 (big=ABCD, little=DCBA)。
+        byteorder 仅影响 float32 的寄存器对组合顺序 (big=ABCD/高字在前,
+        little=DCBA/低字在前; MELSEC 线上原生为小端)。
         返回 ReadResult: raw_registers 原始值 + interpreted 解释值 +
         request_frame 请求帧 hex (便于核对通信)。
         """
-        return await _adapter(protocol).read(
-            Target(protocol=protocol, host=host, port=port, unit=unit),
-            address=address,
-            count=count,
-            datatype=datatype,
-            byteorder=byteorder,
-            timeout_ms=timeout_ms,
-            function_code=function_code,
-        )
+        target = Target(protocol=protocol, host=host, port=port, unit=unit)
+        # 协议特有参数只传给对应适配器 (function_code/area/device 语义不同)
+        kwargs: dict[str, object] = {
+            "address": address,
+            "count": count,
+            "datatype": datatype,
+            "byteorder": byteorder,
+            "timeout_ms": timeout_ms,
+        }
+        if protocol == "modbus":
+            kwargs["function_code"] = function_code
+        elif protocol == "fins":
+            kwargs["area"] = area
+        elif protocol == "melsec":
+            kwargs["device"] = device
+        return await _adapter(protocol).read(target, **kwargs)  # type: ignore[arg-type]
 
     # ------------------------------------------------------------ 诊断层
+
+    @mcp.tool
+    async def diagnose(
+        protocol: str,
+        frame_hex: str | None = None,
+        log_snippet: str | None = None,
+        host: str | None = None,
+        port: int | None = None,
+        unit: int = 1,
+    ) -> DiagnosticReport:
+        """综合观测给出结构化的故障候选结论 (确定性规则, 不编故事)。
+
+        三种证据可任意组合 (至少给一种):
+        - frame_hex: 一帧报文 hex (解析 + 校验 + 规则匹配)
+        - log_snippet: 通信日志文本, 自动提取其中的 hex 帧逐帧解析
+        - host + port: 连上设备做一次探测, 把探测归因纳入推理
+        返回 DiagnosticReport: candidates 按 confidence 降序, 每条含
+        symptom/root_cause/evidence(证据链)/suggested_action/next_tools;
+        evidence 与 observations 保留原始观测供复核。空 candidates =
+        知识库未覆盖, 不硬凑结论。
+        """
+        if not any((frame_hex, log_snippet, host)):
+            raise ValueError("provide at least one of frame_hex / log_snippet / host+port")
+        probe_result = None
+        if host:
+            if not port:
+                raise ValueError("host given without port; port is required for probing")
+            target = Target(protocol=protocol, host=host, port=port, unit=unit)
+            probe_result = await _adapter(protocol).probe(target)
+        frames_hex = [frame_hex] if frame_hex else None
+        from plctap.diag.engine import diagnose as run_diagnosis
+
+        return run_diagnosis(protocol, frames_hex=frames_hex, log_snippet=log_snippet, probe_result=probe_result)
 
     @mcp.tool
     async def parse_frame(
@@ -130,9 +179,13 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         每个字段带 byte_offset 与 raw_hex 证据; 支持正常请求/响应与异常
         响应帧; 畸形帧不抛错, 而是尽量解析并在 errors 里说明哪里坏 ——
         "解析失败的方式"本身是诊断证据。
-        direction: "auto" 按帧结构判别 (异常帧/非 12 字节按响应, 12 字节
-        按请求; fc05/06 的响应与请求完全相同, 任一解释结果一致), 也可
-        显式传 "req" / "resp"。
+        direction: "auto" 按帧结构判别, 也可显式传 "req" / "resp"。
+        - modbus: 异常帧/非 12 字节按响应, 12 字节按请求 (fc05/06 的响应
+          与请求逐字节相同, 任一解释一致)
+        - fins: TCP 命令 0x00 按请求 / 0x01、0x02 按响应; 0x04 按 FINS
+          ICF bit6 判别 (响应置位)
+        - melsec: 数据首字为已知命令 (0x0401) 按请求, 否则按响应
+          (结束代码非 0 的异常响应也能正确归向)
         """
         if direction not in ("auto", "req", "resp"):
             raise ValueError(f"direction must be 'auto'|'req'|'resp', got {direction!r}")
@@ -140,8 +193,10 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             frame = bytes.fromhex(frame_hex)
         except ValueError as e:
             raise ValueError(f"frame_hex is not valid hex: {e}") from e
-        if protocol == "modbus":
-            return _parse_modbus(frame, direction)  # type: ignore[arg-type]
+        if protocol in ("modbus", "fins", "melsec"):
+            from plctap.protocols.auto import parse_auto
+
+            return parse_auto(protocol, frame)
         raise ValueError(f"parse_frame not implemented for {protocol!r} yet")
 
     @mcp.tool
@@ -150,9 +205,12 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     ) -> list[CheckResult]:
         """对一帧报文跑规范校验清单, 逐项 pass/fail (不需要连接设备)。
 
-        Modbus TCP 检查项: MBAP 长度一致性、协议号、功能码合法性、
-        unit 范围、PDU 长度自洽、数量/地址边界、异常码合法性。
-        注意: Modbus TCP 无 CRC (RTU 才有)。direction 取 req 或 resp。
+        Modbus TCP: MBAP 长度一致性、协议号、功能码、unit 范围、PDU
+        自洽、数量/地址边界、异常码 (Modbus TCP 无 CRC, RTU 才有)。
+        FINS/TCP: magic、TCP 长度自洽、TCP 命令合法、error 字段、
+        FINS 端结码、载荷完整性。
+        MELSEC 3E: 副头部、数据长度自洽、命令/软元件代码、结束代码。
+        direction 取 req 或 resp。
         """
         if direction not in ("req", "resp"):
             raise ValueError(f"direction must be 'req' or 'resp', got {direction!r}")
@@ -164,6 +222,14 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             from plctap.protocols.modbus import codec
 
             return codec.validate_frame(frame, direction)  # type: ignore[arg-type]
+        if protocol == "fins":
+            from plctap.protocols.fins import codec
+
+            return codec.validate_frame(frame, direction)  # type: ignore[arg-type]
+        if protocol == "melsec":
+            from plctap.protocols.melsec import codec
+
+            return codec.validate_frame(frame, direction)  # type: ignore[arg-type]
         raise ValueError(f"validate_frame not implemented for {protocol!r} yet")
 
     # ------------------------------------------------------------ 执行层 (闸门)
@@ -173,28 +239,6 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     # allow_write=False 时写类工具根本不注册, Agent 不可见 (D5)
 
     return mcp
-
-
-def _parse_modbus(frame: bytes, direction: str) -> ParseResult:
-    """方向判别后调用对应 codec 纯函数。
-
-    auto 规则: ① 功能码 |0x80 只在响应方向出现 -> resp;
-    ② fc01-06 请求帧恒为 12 字节 -> req (fc05/06 响应是请求的逐字节回显,
-    两种解释字段一致, 优先 req 无信息损失);
-    ③ 其余按响应解析 (诊断场景抓到的多为设备响应)。
-    """
-    from plctap.protocols.modbus import codec
-
-    if direction == "req":
-        return codec.parse_request(frame)
-    if direction == "resp":
-        return codec.parse_response(frame)
-    # auto
-    if len(frame) >= 8 and frame[7] & codec.EXCEPTION_FLAG:
-        return codec.parse_response(frame)
-    if len(frame) == 12 and len(frame) >= 8 and frame[7] in codec.KNOWN_FCS:
-        return codec.parse_request(frame)
-    return codec.parse_response(frame)
 
 
 def _register_write_tools(
@@ -243,7 +287,7 @@ def _register_write_tools(
 def main() -> None:
     """console script 入口: 默认 stdio transport。"""
     app = create_app()
-    app.run()
+    app.run(show_banner=False)
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ async def test_default_tools_registered(tmp_path):
     app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
     async with Client(app) as client:
         tools = {t.name for t in await client.list_tools()}
-    assert {"list_protocols", "probe_device", "plc_read", "parse_frame", "validate_frame"} <= tools
+    assert {"list_protocols", "probe_device", "plc_read", "parse_frame", "validate_frame", "diagnose"} <= tools
 
 
 async def test_write_tool_not_registered_by_default():
@@ -119,3 +119,19 @@ async def test_audit_log_written_on_write_call(tmp_path):
     assert log.exists() and "plc_write" in text
     # fc06 请求帧: MBAP(7B) + 06 + addr=0000 + value=0001 -> 含 "010600000001"
     assert "010600000001" in text
+
+
+def test_main_runs_stdio_without_banner(monkeypatch):
+    """Windows MCP 客户端对 stderr UTF-8 敏感; FastMCP 启动横幅必须关闭。"""
+    import plctap.server as server_module
+    from plctap.server import main
+
+    calls: dict[str, object] = {}
+
+    class FakeApp:
+        def run(self, **kwargs):
+            calls.update(kwargs)
+
+    monkeypatch.setattr(server_module, "create_app", lambda: FakeApp())
+    main()
+    assert calls == {"show_banner": False}

@@ -1,0 +1,593 @@
+# plctap 诊断知识库 (D4, M2)
+#
+# 结构: 每条目 = 确定性匹配条件 (match) + 预审定的静态文案 (candidate)。
+# 引擎只做条件匹配与排序, 不生成自然语言 (HANDOFF 红线 3)。
+#
+# match 条件键 (全部可省略; 给出的全部满足才算命中):
+#   failure_class        探测失败四分类之一 (probe 结果)
+#   exception_code       Modbus 异常码 / FINS-MELSEC 结束代码 (probe 或响应帧)
+#   end_code             FINS/MELSEC 结束代码 (响应帧字段)
+#   parse_error_contains codec 解析报错的子串 (不区分大小写, 任一命中)
+#   check_failed         validate_frame 失败的检查项名 (任一命中)
+#   field                {字段名: [可选值]} —— 响应帧里出现任一值即算
+#   direction            帧方向 req/resp
+#
+# 文案纪律 (红线 1): 全部脱敏 —— 不出现真实 IP、设备型号组合、业务寄存器
+# 语义; 建议只描述"查什么/怎么验证", 不预设行业背景。
+#
+# confidence 语义: 精确码命中 >= 0.9; 结构特征命中 0.85 左右; 泛化提示 < 0.8。
+
+entries:
+  # ================================================================ Modbus 异常码
+  - id: modbus_exc01_illegal_function
+    protocol: modbus
+    match: { exception_code: [1] }
+    candidate:
+      symptom: 设备拒绝该功能码
+      root_cause: 设备不支持此功能码 (fc 不在其实现范围内), 或 fc 与数据区类型不匹配 (如对只读输入区发 fc06)
+      suggested_action: 对照设备手册确认支持的 fc; 换用设备支持的读/写功能码重试
+      confidence: 0.95
+      next_tools: [plc_read]
+
+  - id: modbus_exc02_illegal_data_address
+    protocol: modbus
+    match: { exception_code: [2] }
+    candidate:
+      symptom: 设备拒绝该地址段
+      root_cause: 起始地址或数量超出设备映射区范围, 或 0 基/1 基偏移约定搞反 (口语"40001"=0 基 address 0)
+      suggested_action: 把 count 减为 1 试探边界; 核对地址偏移约定后重算 address
+      confidence: 0.95
+      next_tools: [plc_read]
+
+  - id: modbus_exc03_illegal_data_value
+    protocol: modbus
+    match: { exception_code: [3] }
+    candidate:
+      symptom: 设备拒绝请求参数值
+      root_cause: 数量或写值超出设备允许范围 (如单次读数量上限、fc05 非 0x0000/0xFF00)
+      suggested_action: 减小 count; 写线圈时确认 wire 值为 0x0000/0xFF00
+      confidence: 0.95
+
+  - id: modbus_exc04_server_device_failure
+    protocol: modbus
+    match: { exception_code: [4] }
+    candidate:
+      symptom: 设备执行中出错
+      root_cause: 设备内部错误 (存储区访问失败/固件异常), 多为偶发
+      suggested_action: 重试一次; 持续复现则查设备诊断缓冲与固件日志
+      confidence: 0.9
+
+  - id: modbus_exc05_acknowledge
+    protocol: modbus
+    match: { exception_code: [5] }
+    candidate:
+      symptom: 设备已受理但未完成
+      root_cause: 请求进入设备执行队列 (长操作), 响应将稍后到达
+      suggested_action: 等待后重新读取目标区确认结果
+      confidence: 0.85
+
+  - id: modbus_exc06_server_device_busy
+    protocol: modbus
+    match: { exception_code: [6] }
+    candidate:
+      symptom: 设备忙, 拒绝处理
+      root_cause: 设备正在处理其它请求 (如组态工具长连接、长报文处理), 队列占满
+      suggested_action: 退避重试并拉长调用间隔; 检查是否有其它主站并发访问
+      confidence: 0.85
+
+  - id: modbus_exc0a_gateway_path_unavailable
+    protocol: modbus
+    match: { exception_code: [10] }
+    candidate:
+      symptom: 网关报路径不可用
+      root_cause: 网关无法为 unit id 配置出下行路径 (网关未配置该从站或下行链路断)
+      suggested_action: 核对网关的 unit→从站映射配置; 探测网关下游链路
+      confidence: 0.9
+      next_tools: [probe_device]
+
+  - id: modbus_exc0b_gateway_target_no_response
+    protocol: modbus
+    match: { exception_code: [11] }
+    candidate:
+      symptom: 网关报目标无响应
+      root_cause: 网关路径存在但下行从站不应答 (从站掉线/串口参数不符)
+      suggested_action: 检查从站供电与串口参数 (波特率/校验位); 单独 ping/直连从站验证
+      confidence: 0.9
+
+  # ================================================================ Modbus TCP 帧结构
+  - id: modbus_mbap_truncated
+    protocol: modbus
+    match: { check_failed: [mbap_header_complete] }
+    candidate:
+      symptom: 帧不足 7 字节, MBAP 头不完整
+      root_cause: 半包 (TCP 分段后只截到部分) 或抓包截断; TCP 是流式协议, 单次 read 不保证一整帧
+      suggested_action: 在收发两侧按 MBAP length 字段做定长收帧; 抓包时确认未被截断
+      confidence: 0.9
+
+  - id: modbus_protocol_id_nonzero
+    protocol: modbus
+    match: { check_failed: [protocol_id_zero] }
+    candidate:
+      symptom: MBAP 协议标识非 0
+      root_cause: 中间设备改写过帧, 或这不是标准 Modbus TCP (私有变体/Modbus Plus 封装)
+      suggested_action: 确认链路上有无网关/中间件; 用设备文档核对变体协议头
+      confidence: 0.9
+
+  - id: modbus_length_field_inconsistent
+    protocol: modbus
+    match: { check_failed: [length_field_consistent] }
+    candidate:
+      symptom: MBAP 长度字段与实际字节数不符
+      root_cause: 粘包/半包 (两帧粘连或一帧截断), 或中间设备改写长度域
+      suggested_action: 按 length 字段做流式定长收帧; 抓包核对每帧边界
+      confidence: 0.9
+
+  - id: modbus_unit_id_out_of_range
+    protocol: modbus
+    match: { check_failed: [unit_id_in_range] }
+    candidate:
+      symptom: unit id 超出 0-255
+      root_cause: 帧错位 (把数据当成了头) 或上位机组包错误
+      suggested_action: 校验上位机组包偏移; 从帧头重新对齐解析
+      confidence: 0.85
+
+  - id: modbus_function_code_unknown
+    protocol: modbus
+    match: { check_failed: [function_code_known] }
+    candidate:
+      symptom: 功能码不在已知范围
+      root_cause: 非标准 fc (厂商自定义/诊断码 43/14 等), 或帧错位
+      suggested_action: 查设备手册的厂商自定义 fc 表; 确认帧边界正确
+      confidence: 0.85
+
+  - id: modbus_exception_code_unknown
+    protocol: modbus
+    match: { check_failed: [exception_code_known] }
+    candidate:
+      symptom: 异常码不在 01-0B 标准范围
+      root_cause: 厂商私有异常码, 或帧错位
+      suggested_action: 查设备手册异常码章节; 用 parse_frame 核对帧边界
+      confidence: 0.8
+
+  - id: modbus_exception_frame_length_bad
+    protocol: modbus
+    match: { check_failed: [exception_frame_exact_length] }
+    candidate:
+      symptom: 异常响应长度不是 9 字节
+      root_cause: 异常帧后粘连了其它数据 (粘包), 或抓包混入无关流量
+      suggested_action: 按 MBAP length 切帧后重新解析
+      confidence: 0.8
+
+  - id: modbus_request_pdu_invalid
+    protocol: modbus
+    match: { check_failed: [request_pdu_valid] }
+    candidate:
+      symptom: 请求 PDU 参数非法
+      root_cause: 数量越界 (fc3/4 上限 125 寄存器、fc1/2 上限 2000 点)、地址范围错误, 或 fc05 wire 值非 0x0000/0xFF00
+      suggested_action: 按 fc 的数量/地址上限重新组参; 用 validate_frame 逐项定位
+      confidence: 0.85
+
+  - id: modbus_response_pdu_invalid
+    protocol: modbus
+    match: { check_failed: [response_pdu_valid] }
+    candidate:
+      symptom: 响应字节数与数据不符
+      root_cause: 半包 (数据段未收全) 或响应被中间设备改写
+      suggested_action: 按 MBAP length 定长收全数据段再解析; 抓包核对
+      confidence: 0.85
+
+  - id: modbus_tid_mismatch
+    protocol: modbus
+    match: { parse_error_contains: ["transaction_id mismatch"] }
+    candidate:
+      symptom: 响应事务号与请求不一致
+      root_cause: 并发调用串包 (同一连接上多个请求交叉) 或网关错误转发
+      suggested_action: 同一连接串行收发 (等响应再发下一请求); 检查网关事务处理
+      confidence: 0.9
+
+  - id: modbus_unit_mismatch
+    protocol: modbus
+    match: { parse_error_contains: ["unit_id mismatch"] }
+    candidate:
+      symptom: 响应 unit 与请求不一致
+      root_cause: 网关串话 (unit 映射错) 或连接被其它主站复用
+      suggested_action: 核对网关 unit 路由; 排查同链路上的其它主站
+      confidence: 0.9
+
+  - id: modbus_fc_mismatch
+    protocol: modbus
+    match: { parse_error_contains: ["function_code mismatch"] }
+    candidate:
+      symptom: 响应功能码与请求不一致
+      root_cause: 设备/网关回错包, 或流式收发错位
+      suggested_action: 抓包核对请求-响应配对; 确认连接无并发调用
+      confidence: 0.85
+
+  # ================================================================ Modbus RTU
+  - id: modbus_rtu_crc_mismatch
+    protocol: modbus
+    match: { check_failed: [rtu_crc_valid] }
+    candidate:
+      symptom: RTU 帧校验和错
+      root_cause: 线路噪声/波特率不符/收帧边界错位; 也可能把 TCP 帧误当 RTU 解析
+      suggested_action: 核对串口参数 (波特率/校验位/停止位); 按静默间隔切帧; 确认协议模式 (TCP 无 CRC)
+      confidence: 0.95
+
+  - id: modbus_rtu_frame_too_short
+    protocol: modbus
+    match: { check_failed: [rtu_min_length] }
+    candidate:
+      symptom: RTU 帧不足 4 字节
+      root_cause: 采集截断或帧边界错位 (把上一帧尾部当新帧头)
+      suggested_action: 按 3.5 字符静默间隔重新切帧采集
+      # 0.92 > MBAP 截断条目 (0.9): <4 字节碎片两条轨道都解释不了时,
+      # RTU 截断是更可操作的 top1 结论 (置信度平手会按 KB 顺序先出 TCP 条目)
+      confidence: 0.92
+
+  - id: modbus_rtu_exception_shape_bad
+    protocol: modbus
+    match: { check_failed: [exception_payload_shape] }
+    candidate:
+      symptom: RTU 异常响应形状不对
+      root_cause: 帧边界错位或设备非标准实现
+      suggested_action: 重新切帧; 对照设备手册核对异常帧格式
+      confidence: 0.85
+
+  - id: modbus_rtu_payload_shape_bad
+    protocol: modbus
+    match: { check_failed: [request_payload_shape, response_payload_shape] }
+    candidate:
+      symptom: RTU 载荷长度与功能码不符
+      root_cause: 帧边界错位 (粘包/半包) 或设备非标准实现
+      suggested_action: 按静默间隔重新切帧; 用 parse_frame 的 errors 定位第一个错位点
+      confidence: 0.85
+
+  # ================================================================ FINS/TCP 传输层
+  - id: fins_magic_wrong
+    protocol: fins
+    match: { check_failed: [magic_fins] }
+    candidate:
+      symptom: 帧头不是 "FINS" 魔数
+      root_cause: 端口上不是 FINS/TCP 服务 (可能是 PLC 的 HTTP/其它端口), 或流错位
+      suggested_action: 核对 PLC 以太网端口的服务配置 (FINS/TCP 默认 9600); 重新对齐帧边界
+      confidence: 0.95
+
+  - id: fins_tcp_length_inconsistent
+    protocol: fins
+    match: { check_failed: [tcp_length_consistent] }
+    candidate:
+      symptom: TCP 头长度字段与实际不符
+      root_cause: 粘包/半包或流错位
+      suggested_action: 按头部长度字段定长收帧; 抓包核对帧边界
+      confidence: 0.9
+
+  - id: fins_tcp_command_unknown
+    protocol: fins
+    match: { check_failed: [tcp_command_known] }
+    candidate:
+      symptom: TCP 命令码未知
+      root_cause: 流错位或非标准实现
+      suggested_action: 从 "FINS" 魔数重新对齐; 核对协议版本
+      confidence: 0.85
+
+  - id: fins_tcp_error_nonzero
+    protocol: fins
+    match: { check_failed: [tcp_error_zero] }
+    candidate:
+      symptom: TCP 层错误字段非 0
+      root_cause: PLC 在 TCP 层拒绝了该帧 (握手/状态机错误)
+      suggested_action: 重建连接后重新做节点握手; 核对命令序列
+      confidence: 0.9
+
+  - id: fins_handshake_refused
+    protocol: fins
+    match: { field: { tcp_command: [2] }, direction: resp }
+    candidate:
+      symptom: PLC 回节点连接拒绝 (TCP cmd 0x02)
+      root_cause: 客户端节点号与网络中已有节点冲突, 或 PLC 连接数已满
+      suggested_action: 换客户端节点号; 查 PLC 的 FINS/TCP 连接数配置与已有客户端
+      confidence: 0.9
+
+  - id: fins_end_code_unknown
+    protocol: fins
+    match: { check_failed: [end_code_known] }
+    candidate:
+      symptom: 结束代码不在已知表
+      root_cause: 厂商扩展码或帧错位
+      suggested_action: 查 PLC 手册结束代码表; 用 parse_frame 核对帧边界
+      confidence: 0.8
+
+  - id: fins_sid_mismatch
+    protocol: fins
+    match: { parse_error_contains: ["sid mismatch"] }
+    candidate:
+      symptom: 响应 SID 与请求不一致
+      root_cause: 并发调用串包或网关错误转发
+      suggested_action: 同一连接串行收发; 核对网关转发
+      confidence: 0.9
+
+  - id: fins_node_mismatch
+    protocol: fins
+    match: { parse_error_contains: ["node mismatch"] }
+    candidate:
+      symptom: 响应来源节点与请求目标不一致
+      root_cause: 路由配置错 (DA1 指向的节点不是实际应答者) 或中间网关代答
+      suggested_action: 核对 FINS 路由表与目标节点号; 确认链路上有无网关
+      confidence: 0.9
+
+  # ================================================================ FINS 结束代码
+  - id: fins_0101_service_cancelled
+    protocol: fins
+    match: { end_code: [0x0101] }
+    candidate:
+      symptom: 服务被取消
+      root_cause: 请求处理中途被设备侧取消 (超时/指令打断)
+      suggested_action: 重发请求; 检查设备侧是否有超时/中断配置
+      confidence: 0.85
+
+  - id: fins_0201_local_node_error
+    protocol: fins
+    match: { end_code: [0x0201] }
+    candidate:
+      symptom: 本地节点错误
+      root_cause: 发起方 (客户端侧) 的通信单元异常
+      suggested_action: 检查客户端所在网络单元状态后重试
+      confidence: 0.85
+
+  - id: fins_0202_remote_node_error
+    protocol: fins
+    match: { end_code: [0x0202] }
+    candidate:
+      symptom: 远端节点错误
+      root_cause: 目标 PLC 通信单元异常
+      suggested_action: 检查目标 PLC 通信单元状态 (错误灯/诊断区)
+      confidence: 0.85
+
+  - id: fins_0203_controller_error
+    protocol: fins
+    match: { end_code: [0x0203] }
+    candidate:
+      symptom: 通信控制器错误
+      root_cause: 链路上某通信控制器故障
+      suggested_action: 分段探测链路各节点定位故障段
+      confidence: 0.85
+      next_tools: [probe_device]
+
+  - id: fins_0204_not_able_to_execute
+    protocol: fins
+    match: { end_code: [0x0204] }
+    candidate:
+      symptom: 无法执行 (通信单元未上电/未就绪)
+      root_cause: 目标单元未初始化完成或处于停止状态
+      suggested_action: 确认目标单元运行状态后重试
+      confidence: 0.85
+
+  - id: fins_0205_service_rejected
+    protocol: fins
+    match: { end_code: [0x0205] }
+    candidate:
+      symptom: 服务被拒绝
+      root_cause: 设备处于拒绝服务的状态 (本地模式/保护中)
+      suggested_action: 确认 PLC 运行模式与保护设置
+      confidence: 0.85
+
+  - id: fins_0206_no_response_from_remote
+    protocol: fins
+    match: { end_code: [0x0206] }
+    candidate:
+      symptom: 远端节点无响应
+      root_cause: 目标节点离线/路由不可达 (FINS 经由多层网络时路由表未配)
+      suggested_action: 核对 FINS 路由表; 逐跳探测目标节点
+      confidence: 0.9
+      next_tools: [probe_device]
+
+  - id: fins_0208_communications_error
+    protocol: fins
+    match: { end_code: [0x0208] }
+    candidate:
+      symptom: 通信错误
+      root_cause: 传输中数据损坏 (噪声/拥塞)
+      suggested_action: 重试; 持续出现则查网络质量与负载
+      confidence: 0.85
+
+  - id: fins_0304_destination_node_error
+    protocol: fins
+    match: { end_code: [0x0304] }
+    candidate:
+      symptom: 目标节点不存在/不可达
+      root_cause: DA1 节点号在网络中无对应设备, 或路由表缺失
+      suggested_action: 核对目标节点号与 FINS 路由表
+      confidence: 0.9
+
+  - id: fins_0401_service_undefined
+    protocol: fins
+    match: { end_code: [0x0401] }
+    candidate:
+      symptom: 命令未定义
+      root_cause: 目标设备不支持该 FINS 命令 (如老型号不支持 0101 扩展变体)
+      suggested_action: 查设备手册支持的 FINS 命令表
+      confidence: 0.85
+
+  - id: fins_0402_service_disabled
+    protocol: fins
+    match: { end_code: [0x0402] }
+    candidate:
+      symptom: 命令被禁用
+      root_cause: 设备配置禁用了该命令 (如禁止 FINS 写/禁止上位机访问)
+      suggested_action: 核对 PLC 的 FINS 访问许可设置
+      confidence: 0.85
+
+  - id: fins_0404_busy
+    protocol: fins
+    match: { end_code: [0x0404] }
+    candidate:
+      symptom: 设备忙
+      root_cause: 正在处理其它请求 (组态工具占用/扫描周期满)
+      suggested_action: 退避重试; 检查其它客户端占用
+      confidence: 0.85
+
+  - id: fins_0405_access_denied
+    protocol: fins
+    match: { end_code: [0x0405] }
+    candidate:
+      symptom: 访问被拒绝
+      root_cause: 写保护/口令保护/访问许可未开放
+      suggested_action: 核对 PLC 保护设置与 FINS 访问许可
+      confidence: 0.9
+
+  - id: fins_1101_address_range_error
+    protocol: fins
+    match: { end_code: [0x1101] }
+    candidate:
+      symptom: 地址超出范围
+      root_cause: 起始地址或数量超出该存储区边界 (如 DM 区上限)
+      suggested_action: 减小 count 从区首地址试探边界; 核对区域容量
+      confidence: 0.95
+      next_tools: [plc_read]
+
+  - id: fins_1102_area_type_error
+    protocol: fins
+    match: { end_code: [0x1102] }
+    candidate:
+      symptom: 存储区类型不符
+      root_cause: 区域码与命令不匹配 (如对位操作区发字读变体), 或区域码写错
+      suggested_action: 核对区域码表 (CIO/W/H/A/DM/EM); 确认命令与区类型匹配
+      confidence: 0.9
+
+  # ================================================================ MELSEC 3E
+  - id: melsec_subheader_wrong
+    protocol: melsec
+    match: { check_failed: [subheader_3e_binary] }
+    candidate:
+      symptom: 副头部不是 0x5000
+      root_cause: 对端不是 3E 二进制帧 (ASCII 3E/4C/2C 模式), 或流错位
+      suggested_action: 核对 PLC 以太网模块的通信格式设置 (应为 3E 二进制); 重新对齐帧边界
+      confidence: 0.95
+
+  - id: melsec_data_length_inconsistent
+    protocol: melsec
+    match: { check_failed: [data_length_consistent] }
+    candidate:
+      symptom: 数据长度字段与实际不符
+      root_cause: 粘包/半包或流错位
+      suggested_action: 按头部长度字段定长收帧; 抓包核对帧边界
+      confidence: 0.9
+
+  - id: melsec_command_unsupported
+    protocol: melsec
+    match: { check_failed: [command_supported] }
+    candidate:
+      symptom: 命令码不在支持范围
+      root_cause: 非 0401 批量读 (其它命令/厂商扩展), 或帧错位
+      suggested_action: 查手册命令表; 确认帧边界
+      confidence: 0.85
+
+  - id: melsec_end_code_unknown
+    protocol: melsec
+    match: { check_failed: [end_code_known] }
+    candidate:
+      symptom: 结束代码不在已知表
+      root_cause: 扩展错误码或帧错位
+      suggested_action: 查 CPU 手册结束代码章节; 用 parse_frame 核对帧边界
+      confidence: 0.8
+
+  - id: melsec_c04f_device_range
+    protocol: melsec
+    match: { end_code: [0xC04F] }
+    candidate:
+      symptom: 软元件号超出允许范围
+      root_cause: 起始编号或点数超出该软元件的参数化范围 (范围由 PLC 参数决定, 非固定)
+      suggested_action: 减小 count 从 0 试探边界; 核对 PLC 参数里的软元件容量设定
+      confidence: 0.95
+      next_tools: [plc_read]
+
+  - id: melsec_c059_data_code_error
+    protocol: melsec
+    match: { end_code: [0xC059] }
+    candidate:
+      symptom: 数据代码错误
+      root_cause: "二进制/ASCII 模式不匹配 (常见: 客户端发二进制帧, PLC 配成了 ASCII 3E)"
+      suggested_action: 核对 PLC 通信格式与客户端帧模式一致; 检查帧内容是否被 ASCII 化
+      confidence: 0.9
+
+  - id: melsec_c0d8_access_forbidden
+    protocol: melsec
+    match: { end_code: [0xC0D8] }
+    candidate:
+      symptom: 访问被禁止
+      root_cause: 目标软元件被参数设置为禁止在线访问, 或 CPU 处于保护状态
+      suggested_action: 核对 PLC 参数的在线访问许可与保护设置
+      confidence: 0.9
+
+  - id: melsec_header_echo_mismatch
+    protocol: melsec
+    match: { parse_error_contains: ["network_number mismatch", "pc_number mismatch", "module_io mismatch"] }
+    candidate:
+      symptom: 响应头与请求的路由字段不一致
+      root_cause: 多跳网络 (网络号/PC 号非 0) 时中间模块路由不符, 或串包
+      suggested_action: 核对网络号/PC 号/模块 I/O 配置; 单连接串行收发排除串包
+      confidence: 0.85
+
+  - id: melsec_data_short
+    protocol: melsec
+    match: { parse_error_contains: ["data short"] }
+    candidate:
+      symptom: 响应数据量少于请求
+      root_cause: 半包或设备按异常边界截断返回
+      suggested_action: 按长度字段收全帧再核对; 减小 count 重试
+      confidence: 0.85
+
+  # ================================================================ 连接探测归因
+  - id: probe_connection_refused
+    protocol: any
+    match: { failure_class: [connection_refused] }
+    candidate:
+      symptom: TCP 连接被拒绝
+      root_cause: 目标端口无人监听 (端口/协议配错), 或网络路径不通 (路由/ACL)
+      suggested_action: 核对端口与服务类型 (Modbus 502 / FINS 9600 / MC 传书号自定); ping 与 telnet 验证路径
+      confidence: 0.95
+
+  - id: probe_timeout
+    protocol: any
+    match: { failure_class: [timeout] }
+    candidate:
+      symptom: 连接超时
+      root_cause: 防火墙丢包 (静默丢弃而非拒绝)、路由不通, 或设备离线
+      suggested_action: ping 目标; 查中间防火墙策略; 确认设备在线
+      confidence: 0.9
+
+  - id: probe_no_reply
+    protocol: any
+    match: { failure_class: [connected_but_no_reply] }
+    candidate:
+      symptom: TCP 建立成功但协议层不应答
+      root_cause: 端口对但协议不对 (同端口多服务), 或设备对该会话静默 (已连接数满/仅允许白名单)
+      suggested_action: 核对该端口注册的服务; 查设备的连接数/白名单限制
+      confidence: 0.9
+
+  - id: probe_exception_response
+    protocol: any
+    match: { failure_class: [exception_response] }
+    candidate:
+      symptom: 连接与协议正常, 设备回了异常/错误码
+      root_cause: 应用层拒绝 (地址/权限/参数), 详见 exception_code 对应条目
+      suggested_action: 按 exception_code 在本报告其余候选中定位具体原因
+      confidence: 0.7
+
+# 参考注释 (reference): 命中含数值数据的帧时附加到 observations 的静态提示,
+# 不是候选结论 —— 字节序问题表现为"能读但值不对", 无法从单帧确定性判定。
+references:
+  - protocol: modbus
+    note: >
+      Modbus 寄存器线上为大端; float32 由两个 16 位寄存器拼成, 常见两种组合:
+      ABCD (高字在前, big) 与 DCBA (低字在前, little)。读到的浮点值明显异常
+      (量级跳变/NaN) 时先换 byteorder 交叉验证, 再怀疑设备。
+  - protocol: fins
+    note: >
+      FINS 全大端。float32 组合: big=高字在前 (原生日系组态常见)。
+      读到的浮点值明显异常时先换 byteorder 交叉验证。
+  - protocol: melsec
+    note: >
+      MC/3E 线上为小端 (与 Modbus/FINS 相反)。float32 组合: little=低字在前
+      (MC 原生), big=高字在前 (组态软件导出常见)。读到的浮点值明显异常时先
+      换 byteorder 交叉验证。

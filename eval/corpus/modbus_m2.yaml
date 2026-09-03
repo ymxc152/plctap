@@ -1,0 +1,167 @@
+# M2 评测语料 (Modbus 层): 单帧 TCP / 完整性-CRC / 批量日志 三档
+#
+# 全部帧样本为本仓库 codec 构造的合成帧, 不含真实设备报文 (红线 1)。
+# expect 语义:
+#   valid             parse_frame 的 valid 期望 (可省)
+#   no_candidates     true = 期望诊断无候选 (正常帧)
+#   symptom_keywords  top1 候选 symptom 须含任一关键词
+#   cause_keywords    top1 候选 root_cause 须含任一关键词
+#   check_failed      期望出现的失败检查项 (任一)
+# tier 说明:
+#   single_frame_tcp  单帧 TCP, 考 parse/validate/异常码归因
+#   integrity_crc     RTU 帧, 考 CRC/截断/最小长度
+#   batch_log         多帧日志, 考提取-配对-聚合 (tid 串包/半包/越界混排)
+
+- id: tcp_req_ok
+  tier: single_frame_tcp
+  protocol: modbus
+  input: { frame_hex: "00010000000601030000000a" }
+  expect:
+    valid: true
+    no_candidates: true
+
+- id: tcp_resp_ok
+  tier: single_frame_tcp
+  protocol: modbus
+  input: { frame_hex: "0007000000050103021234" }
+  expect:
+    valid: true
+    no_candidates: true
+
+- id: tcp_exc02_address
+  tier: single_frame_tcp
+  protocol: modbus
+  input: { frame_hex: "000100000003018302" }
+  expect:
+    symptom_keywords: ["拒绝该地址段"]
+    cause_keywords: ["超出范围", "偏移"]
+
+- id: tcp_exc03_value
+  tier: single_frame_tcp
+  protocol: modbus
+  input: { frame_hex: "000200000003018303" }
+  expect:
+    symptom_keywords: ["拒绝请求参数值"]
+    cause_keywords: ["超出设备允许范围"]
+
+- id: tcp_length_field_bad
+  tier: single_frame_tcp
+  protocol: modbus
+  input: { frame_hex: "0003000000100103020000" }
+  expect:
+    check_failed: [length_field_consistent]
+    symptom_keywords: ["长度字段与实际字节数不符"]
+    cause_keywords: ["粘包", "半包"]
+
+- id: tcp_protocol_id_bad
+  tier: single_frame_tcp
+  protocol: modbus
+  # 12 字节读请求, 仅协议标识被改写为 5 (网关/私有变体特征)
+  input: { frame_hex: "00040005000601030000000a" }
+  expect:
+    check_failed: [protocol_id_zero]
+    cause_keywords: ["中间设备", "变体"]
+
+- id: tcp_unit_out_of_range
+  tier: single_frame_tcp
+  protocol: modbus
+  input: { frame_hex: "000500000006ff03020000" }
+  expect:
+    check_failed: [unit_id_in_range]
+
+- id: tcp_unknown_fc
+  tier: single_frame_tcp
+  protocol: modbus
+  # 12 字节帧, fc=0x2f 不在已知范围 (长度字段自洽, 只考功能码维度)
+  input: { frame_hex: "000600000006012f00000000" }
+  expect:
+    check_failed: [function_code_known]
+    cause_keywords: ["厂商自定义", "帧错位"]
+
+- id: rtu_crc_bad
+  tier: integrity_crc
+  protocol: modbus
+  input: { frame_hex: "01030000000184f5" }
+  expect:
+    symptom_keywords: ["RTU 帧校验和错"]
+    cause_keywords: ["波特率", "噪声", "切帧"]
+
+- id: rtu_ok
+  tier: integrity_crc
+  protocol: modbus
+  input: { frame_hex: "010300000001840a" }
+  expect:
+    no_candidates: true
+
+- id: rtu_too_short
+  tier: integrity_crc
+  protocol: modbus
+  input: { frame_hex: "0103" }
+  expect:
+    symptom_keywords: ["RTU 帧不足 4 字节"]
+
+- id: rtu_exc_shape_ok
+  tier: integrity_crc
+  protocol: modbus
+  # 5 字节异常响应: fc83 (fc3|0x80), 异常码 02, CRC 正确
+  input: { frame_hex: "018302c0f1" }
+  expect:
+    symptom_keywords: ["设备拒绝该地址段"]
+    cause_keywords: ["超出"]
+
+- id: rtu_exc_crc_bad
+  tier: integrity_crc
+  protocol: modbus
+  input: { frame_hex: "0183023ff1" }
+  expect:
+    symptom_keywords: ["RTU 帧校验和错"]
+
+- id: log_normal_flow
+  tier: batch_log
+  protocol: modbus
+  input:
+    log_snippet: >-
+      TX 000100000006010300000002 | RX 00010000000701030400010002
+  expect:
+    no_candidates: true
+
+- id: log_tid_mismatch
+  tier: batch_log
+  protocol: modbus
+  input:
+    log_snippet: >-
+      TX 000100000006010300000002 | RX 00420000000701030400010002
+  expect:
+    symptom_keywords: ["响应事务号与请求不一致"]
+    cause_keywords: ["串包", "网关"]
+
+- id: log_truncated_resp
+  tier: batch_log
+  protocol: modbus
+  input:
+    log_snippet: >-
+      TX 000100000006010300000002 | RX 0001000000070103040001
+  expect:
+    symptom_keywords: ["字节数与数据不符", "长度字段与实际字节数不符"]
+    cause_keywords: ["半包"]
+
+- id: log_exc_mixed_flow
+  tier: batch_log
+  protocol: modbus
+  input:
+    log_snippet: >-
+      TX 000100000006010300640005 | RX 000100000003018302 | TX 000200000006010300000002 | RX 00020000000701030400010002
+  expect:
+    symptom_keywords: ["拒绝该地址段"]
+
+- id: log_multi_issue_mix
+  tier: batch_log
+  protocol: modbus
+  input:
+    log_snippet: >-
+      conn refused at gw-01 | TX 000100000006010300000002 |
+      RX 00420000000701030400010002 | TX 01030000000184f5
+  expect:
+    # 三个问题并存: 连接拒绝(仅噪声文本, 无 probe 输入不产生候选) +
+    # TCP tid 串包 + RTU 坏 CRC 帧; 考提取-配对-双轨判别的聚合
+    symptom_keywords: ["响应事务号与请求不一致", "RTU 帧校验和错"]

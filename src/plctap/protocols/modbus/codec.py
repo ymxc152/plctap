@@ -11,9 +11,9 @@
 from __future__ import annotations
 
 import struct
-from typing import Literal, Sequence
+from typing import Literal
 
-from plctap.models import ByteOrder, CheckResult, FrameField, ParseResult
+from plctap.models import CheckResult, FrameField, ParseResult
 
 # 功能码 (M1 覆盖读 1-4 与单写 5-6; 多写 15/16 留 M3 写闸门)
 READ_COILS = 1
@@ -471,43 +471,131 @@ def _check_response_pdu(frame: bytes, fc: int) -> CheckResult:
 # ---------------------------------------------------------------- 解释
 
 
-def interpret_registers(
-    raw: Sequence[int],
-    datatype: str | None = None,
-    byteorder: ByteOrder = "big",
-) -> list[float | int]:
-    """把寄存器原始值按 datatype 解释 (T4)。
+# ---------------------------------------------------------------- 解释
 
-    字节序决策: Modbus 寄存器 16 位内容按规范恒为大端, byteorder 只影响
-    32 位 (float32) 的**寄存器对组合顺序**:
-    - "big":    高字在前, 字内大端 (ABCD, 最常见)
-    - "little": 低字在前, 字内小端 (DCBA)
-    常见的字交换 CDAB 等其它组合留待知识库收录后作为独立选项加入,
-    M1 只做显式两档, 避免隐式猜测。
+
+# 解释逻辑与 FINS/MC 共用, 收敛到 protocols/common.py (字节序已参数化);
+# 此处 re-export 保持 modbus.codec.interpret_registers 的既有调用面。
+from plctap.protocols.common import interpret_registers  # noqa: E402, F401
+
+
+# ---------------------------------------------------------------- RTU (仅校验/评测)
+
+
+def crc16(data: bytes) -> int:
+    """Modbus RTU CRC-16: poly 0xA001 (反转 0x8005), 初值 0xFFFF, 无终异或。
+
+    纯函数, 供 validate 与评测 CRC 档使用; v1 协议范围仍只有 TCP
+    (HANDOFF 决策 9), RTU 不建适配器不做串口 I/O。
     """
-    if datatype is None:
-        return list(raw)
-    if datatype == "uint16":
-        return list(raw)
-    if datatype == "int16":
-        return [v - 0x10000 if v >= 0x8000 else v for v in raw]
-    if datatype == "float32":
-        if len(raw) % 2 != 0:
-            raise ValueError(
-                f"float32 needs an even number of registers, got {len(raw)}"
-            )
-        out: list[float] = []
-        for i in range(0, len(raw), 2):
-            if byteorder == "big":
-                b = raw[i].to_bytes(2, "big") + raw[i + 1].to_bytes(2, "big")
-                (f,) = struct.unpack(">f", b)
-            elif byteorder == "little":
-                b = raw[i].to_bytes(2, "little") + raw[i + 1].to_bytes(2, "little")
-                (f,) = struct.unpack("<f", b)
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0xA001
             else:
-                raise ValueError(f"unknown byteorder {byteorder!r} (use 'big' or 'little')")
-            out.append(f)
-        return out
-    raise ValueError(
-        f"unknown datatype {datatype!r} (supported: uint16, int16, float32)"
-    )
+                crc >>= 1
+    return crc
+
+
+def parse_rtu(frame: bytes, direction: Literal["req", "resp"] = "auto") -> ParseResult:
+    """解析 RTU 帧 (addr + fc + PDU + CRC2 小端)。畸形帧记 errors 不抛。
+
+    方向 auto 规则与 TCP 一致: 异常帧按响应; 8 字节帧按请求
+    (fc01-06 请求恒 8 字节; fc05/06 响应回显同形, 两种解释一致)。
+    """
+    if direction == "auto":
+        direction = "req" if len(frame) == 8 else "resp"
+    errors: list[str] = []
+    fields: list[FrameField] = []
+    if len(frame) < 4:  # addr1 + fc1 + crc2
+        return ParseResult(protocol="modbus", direction=direction, fields=fields, valid=False,
+                           errors=[f"frame too short for RTU: {len(frame)} < 4 bytes"])
+    addr = frame[0]
+    fc = frame[1]
+    payload = frame[2:-2]
+    fields.append(_field(frame, "address", addr, 0, 1, "从站地址 (RTU)"))
+    fields.append(_field(frame, "function_code", fc, 1, 1,
+                         f"异常响应 for fc{fc & 0x7F}" if fc & EXCEPTION_FLAG else ""))
+    fields.append(_field(frame, "payload", list(payload), 2, len(payload)))
+    (crc_wire,) = struct.unpack_from("<H", frame, len(frame) - 2)  # CRC 小端
+    crc_calc = crc16(frame[:-2])
+    fields.append(_field(frame, "crc", crc_wire, len(frame) - 2, 2,
+                         f"computed {crc_calc:#06x}; {'OK' if crc_wire == crc_calc else 'MISMATCH'}"))
+    if crc_wire != crc_calc:
+        errors.append(f"CRC mismatch: wire {crc_wire:#06x}, computed {crc_calc:#06x}")
+    if fc & EXCEPTION_FLAG:
+        if len(payload) != 1:
+            errors.append(f"exception response payload must be 1 byte, got {len(payload)}")
+        elif payload[0] not in EXCEPTION_CODES:
+            errors.append(f"unknown exception code {payload[0]:#04x}")
+        else:
+            fields[-2].note = f"exception {exception_name(payload[0])} for fc{fc & 0x7F}"
+        if len(payload) == 1:
+            # exception_code 字段与 TCP 解析对齐, 诊断引擎按异常码匹配 KB 时
+            # 不必区分 TCP/RTU 轨道
+            fields.append(_field(frame, "exception_code", payload[0], 2, 1,
+                                 EXCEPTION_CODES.get(payload[0], f"UNKNOWN_0x{payload[0]:02X}")))
+        return ParseResult(protocol="modbus", direction="resp", fields=fields, valid=not errors, errors=errors)
+    if fc not in KNOWN_FCS:
+        errors.append(f"unknown function code {fc:#04x}")
+        return ParseResult(protocol="modbus", direction=direction, fields=fields, valid=not errors, errors=errors)
+    if fc in READ_FCS and direction == "resp":
+        if len(payload) < 1:
+            errors.append("response truncated: missing byte count")
+            return ParseResult(protocol="modbus", direction="resp", fields=fields, valid=False, errors=errors)
+        byte_count = payload[0]
+        data = payload[1:]
+        fields.append(_field(frame, "byte_count", byte_count, 3, 1))
+        fields.append(_field(frame, "register_values",
+                             [int.from_bytes(data[i:i + 2], "big") for i in range(0, min(byte_count, len(data)) - 1, 2)],
+                             4, len(data), "16-bit 大端字值"))
+        if len(data) != byte_count:
+            errors.append(f"byte_count {byte_count} != data bytes {len(data)}")
+    elif direction == "req" and len(payload) != 4:
+        errors.append(f"request payload must be 4 bytes (addr2+operand2), got {len(payload)}")
+    return ParseResult(protocol="modbus", direction=direction, fields=fields, valid=not errors, errors=errors)
+
+
+def validate_rtu(frame: bytes, direction: Literal["req", "resp"] = "auto") -> list[CheckResult]:
+    """RTU 校验清单: 最短长度、CRC、功能码、payload 形状。"""
+    checks: list[CheckResult] = []
+    checks.append(CheckResult(name="rtu_min_length", passed=len(frame) >= 4,
+                              detail=f"got {len(frame)} bytes, need >= 4 (addr+fc+crc)"))
+    if len(frame) < 4:
+        return checks
+    (crc_wire,) = struct.unpack_from("<H", frame, len(frame) - 2)
+    crc_calc = crc16(frame[:-2])
+    checks.append(CheckResult(name="rtu_crc_valid", passed=crc_wire == crc_calc,
+                              detail=f"wire={crc_wire:#06x}, computed={crc_calc:#06x} (poly 0xA001, LE)"))
+    fc = frame[1]
+    checks.append(CheckResult(name="function_code_known",
+                              passed=(fc & 0x7F) in KNOWN_FCS,
+                              detail=f"function_code={fc:#04x}"))
+    if direction == "auto":
+        direction = "req" if len(frame) == 8 else "resp"
+    if fc & EXCEPTION_FLAG:
+        checks.append(CheckResult(name="exception_payload_shape",
+                                  passed=len(frame) == 5,
+                                  detail=f"exception frame must be 5 bytes (addr+fc|0x80+code+crc2), got {len(frame)}"))
+    elif direction == "req":
+        checks.append(CheckResult(name="request_payload_shape",
+                                  passed=len(frame) == 8,
+                                  detail=f"read/write request must be 8 bytes, got {len(frame)}"))
+    else:
+        # 响应形状: 写单点响应 (fc05/06/0f/10) 是 8 字节回显; 读响应帧长
+        # 恒为 5 + byte_count (addr+fc+bc+data+crc2)。byte_count 与帧长
+        # 自洽是区分真 RTU 响应与 "被硬解成 RTU 的 TCP 帧" 的关键证据 ——
+        # 12 字节 TCP 请求当 RTU 响应解时 byte_count 对不上帧长。
+        if fc in WRITE_FCS:
+            checks.append(CheckResult(name="response_payload_shape", passed=len(frame) == 8,
+                                      detail=f"write echo must be 8 bytes, got {len(frame)}"))
+        elif fc in READ_FCS:
+            bc = frame[2]
+            checks.append(CheckResult(name="response_payload_shape", passed=len(frame) == 5 + bc,
+                                      detail=f"read response length {len(frame)} != 5 + byte_count {bc:#04x}"))
+        else:
+            checks.append(CheckResult(name="response_payload_shape", passed=len(frame) >= 6,
+                                      detail=f"got {len(frame)} bytes"))
+    return checks

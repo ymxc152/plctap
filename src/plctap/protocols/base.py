@@ -112,3 +112,43 @@ async def recv_exact(
     """定长读取, 统一包 wait_for 超时 (D3)。EOF 抛 IncompleteReadError。"""
     return await asyncio.wait_for(reader.readexactly(n), timeout)
 
+
+class ProtocolError(RuntimeError):
+    """工具层协议错误基类。消息只含事实 (异常码/端结码/超时), 叙述性
+    解释由 Agent + Skill 层完成 (D4); 各协议子类化以区分异常类型。"""
+
+
+async def locked_exchange(
+    pool: ConnectionPool,
+    key: ConnectionKey,
+    request: bytes,
+    recv: "Callable[[asyncio.StreamReader, float], bytes]",
+    timeout: float,
+) -> bytes:
+    """通用"目标级锁内一次请求-响应配对" (M2 起新协议共用)。
+
+    - 超时统一包装为 ProtocolError (带目标上下文, 便于 Agent 读取)
+    - 协议层错误/流异常时丢弃连接 (状态可能失步), 正常完成归还池
+    """
+    async with pool.lock_for(key):
+        conn = await pool.acquire(key, timeout)
+        try:
+            conn.writer.write(request)
+            await asyncio.wait_for(conn.writer.drain(), timeout)
+            resp = await recv(conn.reader, timeout)
+        except ProtocolError:
+            # 协议层已判定异常 (如坏长度字段), 流不可复用
+            pool.discard(conn)
+            raise
+        except TimeoutError:
+            pool.discard(conn)
+            raise ProtocolError(
+                f"timeout waiting for response from {key.target}"
+            ) from None
+        except (asyncio.IncompleteReadError, OSError, ConnectionError):
+            pool.discard(conn)
+            raise
+        else:
+            pool.release(conn)
+            return resp
+

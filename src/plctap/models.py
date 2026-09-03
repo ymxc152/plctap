@@ -92,9 +92,28 @@ class RawExchange(BaseModel):
     elapsed_ms: int
 
 
-class DiagnosticReport(BaseModel):
-    """诊断引擎 (M2, D4) 的结构化输出, 占位定义。candidates 元素:
-    {symptom, evidence[], confidence, suggested_action}。"""
+class Candidate(BaseModel):
+    """诊断候选结论 (D4): 由确定性规则从观测证据推导, 不含自然语言生成
+    (HANDOFF 红线 3 —— kb.yaml 的文案是预先审定的静态文本)。
 
-    candidates: list[dict[str, Any]] = []
+    confidence 取 0-1; 规则命中强度决定取值 (精确码命中 > 关键字命中)。
+    """
+
+    symptom: str
+    root_cause: str
+    evidence: list[str] = []
+    confidence: float
+    suggested_action: str
     next_tools: list[str] = []
+
+
+class DiagnosticReport(BaseModel):
+    """诊断引擎 (D4) 的结构化输出: 按置信度降序的候选结论列表。
+
+    observations 汇总本次诊断使用的原始观测 (probe 结果/解析错误/校验
+    失败项), 供 Agent 复核推理链; 空候选 = 知识库未覆盖, 如实返回空。
+    """
+
+    candidates: list[Candidate] = []
+    next_tools: list[str] = []
+    observations: list[str] = []

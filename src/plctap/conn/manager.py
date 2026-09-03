@@ -47,6 +47,9 @@ class PooledConnection:
         self.key = key
         self.ephemeral = ephemeral
         self.last_used = time.monotonic()
+        # 协议适配器的每连接会话状态 (如 FINS/TCP 已完成的节点握手);
+        # 连接复用时状态随连接保留, 连接销毁即作废
+        self.metadata: dict[str, object] = {}
 
     @property
     def closed(self) -> bool:
