@@ -5,8 +5,20 @@
 
 ![demo](docs/demo.gif)
 
-**状态: 开发中 (M1: Modbus TCP 读写闭环, 已通过 ProtoForge 实机联测)。** 本 README 将随里程碑补全:
-首屏场景演示 GIF、五档评测对比表、三端接入截图。
+**状态: 开发中 (M3: 三协议 + 诊断引擎 + 钓鱼监听)。** 本 README 将随里程碑补全:
+五档评测对比表 (工具模式 vs 裸模型)、三端接入截图 (待用户环境)。
+
+## 工具
+
+| 层 | 工具 | 说明 |
+|---|---|---|
+| 连接 | `probe_device` | 连通性探测 + 四类失败分层归因 |
+| 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (三协议) |
+| 诊断 | `parse_frame` / `validate_frame` | 单帧结构化解析 / 规范校验清单 |
+| 诊断 | `diagnose` | 规则引擎 + 故障知识库 → 结构化候选报告 |
+| 诊断 | `parse_pcap` | 解析 Wireshark 导出 pcap, 逐流逐帧 (需 `uv sync --extra eval`) |
+| 监听 | `start_listener` / `stop_listener` / `get_listener_frames` | 钓鱼模式: 设备只能当 client 时立假 server 收帧分析 |
+| 执行 | `plc_write` / `send_frame` | **默认不注册**, `PLCTAP_ALLOW_WRITE=true` 才启用 (闸门) |
 
 ## 快速开始
 

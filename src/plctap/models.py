@@ -120,3 +120,19 @@ class DiagnosticReport(BaseModel):
     candidates: list[Candidate] = []
     next_tools: list[str] = []
     observations: list[str] = []
+
+
+class PcapFrame(BaseModel):
+    """parse_pcap 输出的单帧。完整帧带 parse_auto 结果; 抓包尾部半帧
+    标 partial (截断是诊断信息, 不静默丢弃)。"""
+
+    frame_hex: str
+    partial: bool = False
+    parsed: ParseResult | None = None
+
+
+class PcapFlow(BaseModel):
+    """parse_pcap 输出的单条 TCP 流: 流向标识 + 双向帧序列。"""
+
+    flow: str
+    frames: list[PcapFrame] = []

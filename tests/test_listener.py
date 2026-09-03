@@ -1,0 +1,226 @@
+"""钓鱼模式监听测试 (M3: listener.py record_only / respond_normal 两档)。
+
+用真 socket 连 listener, 验证收帧、回包、EOF 不挂起、生命周期管理。
+端口用 0 让系统分配, 避免测试并发冲突。
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from plctap import streams
+from plctap.listener import ListenerRegistry
+from plctap.protocols.fins import codec as fins_codec
+from plctap.protocols.melsec import codec as mc_codec
+from plctap.protocols.modbus import codec as modbus_codec
+
+
+@pytest.fixture
+async def registry():
+    reg = ListenerRegistry()
+    yield reg
+    for port in list(reg.active_ports()):
+        try:
+            await reg.stop(port)
+        except Exception:
+            pass
+
+
+async def _start(reg, protocol, **kw):
+    info = await reg.start(protocol, "127.0.0.1", 0, kw.pop("mode", "record_only"), **kw)
+    return info["port"]
+
+
+async def _recv_frame(reader: asyncio.StreamReader, protocol: str, timeout: float = 2.0) -> bytes:
+    """用与 listener 相同的分帧逻辑收一整帧 (测试端复用 streams)。"""
+    buf = bytearray()
+    while True:
+        n = streams.try_frame_len(protocol, buf)
+        if n is not None and n > 0:
+            return bytes(buf[:n])
+        chunk = await asyncio.wait_for(reader.read(4096), timeout)
+        if not chunk:
+            return b""
+        buf.extend(chunk)
+
+
+async def _send_only(port: int, data: bytes, timeout: float = 2.0) -> None:
+    """只发送不等待响应 (record_only 场景: listener 本来就不回包)。"""
+    reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout)
+    try:
+        writer.write(data)
+        await writer.drain()
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (OSError, ConnectionError):
+            pass
+
+
+async def _roundtrip(port: int, protocol: str, data: bytes, timeout: float = 2.0) -> bytes:
+    reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout)
+    try:
+        writer.write(data)
+        await writer.drain()
+        return await _recv_frame(reader, protocol, timeout)
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (OSError, ConnectionError):
+            pass
+
+
+async def _wait_frames(reg: ListenerRegistry, port: int, n: int, timeout: float = 3.0) -> list[dict]:
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        frames = reg.frames(port)
+        if len(frames) >= n:
+            return frames
+        await asyncio.sleep(0.01)
+    return reg.frames(port)
+
+
+# ---------------------------------------------------------------- record_only
+
+
+async def test_record_only_captures_modbus(registry):
+    port = await _start(registry, "modbus", mode="record_only")
+    req = modbus_codec.build_read_request(1, 1, 3, 0, 2)
+    await _send_only(port, req)
+    frames = await _wait_frames(registry, port, 1)
+    assert frames[0]["direction"] == "recv"
+    assert frames[0]["frame_hex"] == req.hex()
+
+
+async def test_record_only_no_reply(registry):
+    port = await _start(registry, "modbus", mode="record_only")
+    req = modbus_codec.build_read_request(1, 1, 3, 0, 2)
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(req)
+        await writer.drain()
+        with pytest.raises((asyncio.TimeoutError, TimeoutError)):
+            await asyncio.wait_for(_recv_frame(reader, "modbus", 0.3), 0.4)
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (OSError, ConnectionError):
+            pass
+
+
+async def test_eof_partial_frame_then_reconnect(registry):
+    """半帧后 EOF: handler 必须正常退出 (return), 下一连接仍可用。
+
+    若 EOF 处理成 continue 会形成无挂起自旋饿死事件循环, 此测试会超时。
+    """
+    port = await _start(registry, "modbus", mode="record_only")
+    req = modbus_codec.build_read_request(1, 1, 3, 0, 2)
+    # 第一次连接: 只发半帧就断开
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(req[:6])
+    await writer.drain()
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except (OSError, ConnectionError):
+        pass
+    # 第二次连接: 完整帧应正常被记录
+    await _send_only(port, req)
+    frames = await _wait_frames(registry, port, 1, timeout=3.0)
+    assert frames[-1]["frame_hex"] == req.hex()
+
+
+async def test_double_start_same_port_rejected(registry):
+    info = await reg_start(registry, "modbus")
+    port = info["port"]
+    with pytest.raises(ValueError, match="already running"):
+        await registry.start("modbus", "127.0.0.1", port, "record_only")
+
+
+async def reg_start(reg, protocol):
+    return await reg.start(protocol, "127.0.0.1", 0, "record_only")
+
+
+async def test_stop_returns_stats(registry):
+    port = await _start(registry, "modbus", mode="record_only")
+    req = modbus_codec.build_read_request(1, 1, 3, 0, 2)
+    await _send_only(port, req)
+    await _wait_frames(registry, port, 1)
+    summary = await registry.stop(port)
+    assert summary["recorded"] == 1
+    assert summary["status"] == "stopped"
+    assert port not in registry.active_ports()
+
+
+# ---------------------------------------------------------------- respond_normal
+
+
+async def test_modbus_respond_normal(registry):
+    port = await _start(registry, "modbus", mode="respond_normal")
+    req = modbus_codec.build_read_request(7, 1, 3, 0, 3)
+    resp = await _roundtrip(port, "modbus", req)
+    parsed = modbus_codec.parse_response(resp, request=req)
+    assert parsed.valid, parsed.errors
+    values = next(f.value for f in parsed.fields if f.name == "register_values")
+    assert values == [0, 0, 0]  # 最小正常响应: 数据恒 0
+
+
+async def test_modbus_respond_normal_fc05_echo(registry):
+    port = await _start(registry, "modbus", mode="respond_normal")
+    req = modbus_codec.build_write_single(3, 1, 6, 100, 42)
+    resp = await _roundtrip(port, "modbus", req)
+    assert resp == req  # 写单点响应 = 请求回显
+
+
+async def test_fins_respond_normal_handshake_and_read(registry):
+    port = await _start(registry, "fins", mode="respond_normal")
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(fins_codec.build_handshake_request(1))
+        await writer.drain()
+        hs = await _recv_frame(reader, "fins")
+        info = fins_codec.parse_handshake_response(hs)
+        assert 1 <= info["server_node"] <= 239
+        # 后续请求 DA1 定向到握手确认的 server_node (M2 适配器同款逻辑)
+        req = fins_codec.build_read_request(
+            5, 1, fins_codec.AREA_CODES["DM"], 0, 2, dest_node=info["server_node"]
+        )
+        writer.write(req)
+        await writer.drain()
+        resp = await _recv_frame(reader, "fins")
+        parsed = fins_codec.parse_response(resp, request=req)
+        assert parsed.valid, parsed.errors
+        values = next(f.value for f in parsed.fields if f.name == "word_values")
+        assert values == [0, 0]
+    finally:
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (OSError, ConnectionError):
+            pass
+
+
+async def test_melsec_respond_normal(registry):
+    port = await _start(registry, "melsec", mode="respond_normal")
+    req = mc_codec.build_read_request("D", 10, 3)
+    resp = await _roundtrip(port, "melsec", req)
+    parsed = mc_codec.parse_response(resp, request=req)
+    assert parsed.valid, parsed.errors
+    values = next(f.value for f in parsed.fields if f.name == "word_values")
+    assert values == [0, 0, 0]
+
+
+async def test_respond_normal_records_both_directions(registry):
+    port = await _start(registry, "modbus", mode="respond_normal")
+    req = modbus_codec.build_read_request(1, 1, 3, 0, 1)
+    await _roundtrip(port, "modbus", req)
+    frames = await _wait_frames(registry, port, 2)
+    dirs = [f["direction"] for f in frames]
+    assert dirs == ["recv", "send"]
+    assert frames[0]["frame_hex"] == req.hex()

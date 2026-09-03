@@ -15,8 +15,10 @@ from plctap.models import (
     ByteOrder,
     CheckResult,
     DiagnosticReport,
+    PcapFlow,
     ParseResult,
     ProbeResult,
+    RawExchange,
     ReadResult,
     Target,
 )
@@ -24,13 +26,17 @@ from plctap.protocols.base import adapter_for, known_protocols
 from plctap.protocols.fins.adapter import FinsAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.melsec.adapter import MelsecAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.modbus.adapter import ModbusAdapter  # noqa: F401  # 注册副作用
+from plctap.listener import ListenerRegistry
 from plctap.safety import AuditLog
 
 _INSTRUCTIONS = (
     "plctap 是 Agent 的 PLC 驱动层 (Modbus TCP / FINS / MELSEC)。\n"
     "典型流程: probe_device 确认连通性与故障层 -> plc_read 取数 -> "
     "parse_frame/validate_frame 做报文级深挖。\n"
-    "所有工具无状态: 每次调用都带 host/port, 不需要维护会话。"
+    "报文证据三来源: frame_hex / log_snippet / pcap 文件 (parse_pcap)。\n"
+    "设备只能当 client 时: start_listener 起钓鱼监听收帧再分析。\n"
+    "所有工具无状态: 每次调用都带 host/port, 不需要维护会话 (listener 是例外,\n"
+    "它有 start/stop/frames 生命周期)。"
 )
 
 
@@ -42,6 +48,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         max_per_target=config.pool_max_per_target,
     )
     audit = AuditLog(config.audit_log)
+    listeners = ListenerRegistry()
 
     def _adapter(protocol: str):
         return adapter_for(protocol)(pool, config)
@@ -61,7 +68,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
                     "probe": True,
                     "read": True,
                     "write": config.allow_write,  # 写能力随闸门而变 (D5)
-                    "send_raw": False,  # send_frame 工具 M3 注册前恒为 False (与实际一致)
+                    "send_raw": config.allow_write,  # send_frame 与写同闸门
                 }
                 for name in known_protocols()
             },
@@ -233,6 +240,51 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             return codec.validate_frame(frame, direction)  # type: ignore[arg-type]
         raise ValueError(f"validate_frame not implemented for {protocol!r} yet")
 
+    # ------------------------------------------------------------ 报文证据: pcap
+
+    @mcp.tool
+    async def parse_pcap(path: str, protocol: str | None = None) -> list[PcapFlow]:
+        """解析 Wireshark 导出 pcap: 按 TCP 流聚合载荷 -> 按协议切帧 -> 逐帧 parse_auto。
+
+        每个流返回完整帧序列 (带结构化解析) 与尾部半帧 (partial, 截断也是
+        诊断信息)。protocol 缺省时按"完整帧数最多的协议"自动判别。
+        需要可选依赖 scapy (uv sync --extra eval)。大批量帧场景比逐条
+        frame_hex 高效得多。
+        """
+        from plctap import pcap
+
+        return pcap.parse_pcap_file(path, protocol)
+
+    # ------------------------------------------------------------ 钓鱼模式监听
+
+    @mcp.tool
+    async def start_listener(
+        protocol: str,
+        host: str = "0.0.0.0",
+        port: int = 0,
+        mode: str = "record_only",
+        idle_timeout_sec: int = 120,
+    ) -> dict:
+        """起钓鱼模式监听: 待测设备只能当 client 时, 立假 server 钓出它的帧行为。
+
+        mode: record_only=只收帧不回复 (纯被动) / respond_normal=对读类请求
+        回最小"正常响应" (数据恒 0, 目的只是让设备继续吐帧, 非通用模拟器)。
+        收下的帧用 get_listener_frames 取, 再喂 parse_frame/diagnose。
+        port=0 由系统分配, 返回实际端口。建议收满样本后 stop_listener,
+        并提醒用户恢复设备原配置 (BUILD.md Skill 节)。
+        """
+        return await listeners.start(protocol, host, port, mode, idle_timeout_sec)
+
+    @mcp.tool
+    async def stop_listener(port: int) -> dict:
+        """停掉指定端口的监听, 返回收/发帧统计。"""
+        return await listeners.stop(port)
+
+    @mcp.tool
+    async def get_listener_frames(port: int, limit: int = 100) -> list[dict]:
+        """取监听收下的帧 (direction/peer/frame_hex), 供 parse_frame/diagnose 分析。"""
+        return listeners.frames(port, limit)
+
     # ------------------------------------------------------------ 执行层 (闸门)
 
     if config.allow_write:
@@ -282,6 +334,37 @@ def _register_write_tools(
             ),
             point_type=point_type,
             timeout_ms=timeout_ms,
+        )
+
+    @mcp.tool
+    async def send_frame(
+        protocol: str,
+        host: str,
+        port: int,
+        frame_hex: str,
+        unit: int = 1,
+        timeout_ms: int | None = None,
+    ) -> RawExchange:
+        """发送任意原始帧并等待一帧响应 (危险: 直接与真实设备交互)。
+
+        完整帧在发送前写入审计日志 (D5: 失败也留痕); 与 plc_write 同受
+        allow_write 闸门控制。用于协议调试/故障注入复现; 常规读写请用
+        plc_read / plc_write, 不要用原始帧。
+        """
+        try:
+            bytes.fromhex(frame_hex)
+        except ValueError as e:
+            raise ValueError(f"frame_hex is not valid hex: {e}") from e
+        adapter = adapter_for(protocol)(pool, config)
+        audit.record(
+            tool="send_frame",
+            target=f"{protocol}://{host}:{port} unit={unit}",
+            frame_hex=frame_hex,
+        )
+        return await adapter.send_raw(
+            Target(protocol=protocol, host=host, port=port, unit=unit),
+            frame_hex,
+            timeout_ms,
         )
 
 

@@ -21,7 +21,18 @@ async def test_default_tools_registered(tmp_path):
     app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
     async with Client(app) as client:
         tools = {t.name for t in await client.list_tools()}
-    assert {"list_protocols", "probe_device", "plc_read", "parse_frame", "validate_frame", "diagnose"} <= tools
+    assert {
+        "list_protocols",
+        "probe_device",
+        "plc_read",
+        "parse_frame",
+        "validate_frame",
+        "diagnose",
+        "parse_pcap",
+        "start_listener",
+        "stop_listener",
+        "get_listener_frames",
+    } <= tools
 
 
 async def test_write_tool_not_registered_by_default():
@@ -29,6 +40,7 @@ async def test_write_tool_not_registered_by_default():
     async with Client(app) as client:
         tools = {t.name for t in await client.list_tools()}
     assert "plc_write" not in tools  # D5: 闸门关闭时 Agent 不可见
+    assert "send_frame" not in tools  # 原始帧与写同闸门
 
 
 async def test_write_tool_registered_when_allowed(tmp_path):
@@ -37,7 +49,7 @@ async def test_write_tool_registered_when_allowed(tmp_path):
     )
     async with Client(app) as client:
         tools = {t.name for t in await client.list_tools()}
-    assert "plc_write" in tools
+    assert {"plc_write", "send_frame"} <= tools
 
 
 async def test_list_protocols_contains_modbus(tmp_path):
@@ -135,3 +147,29 @@ def test_main_runs_stdio_without_banner(monkeypatch):
     monkeypatch.setattr(server_module, "create_app", lambda: FakeApp())
     main()
     assert calls == {"show_banner": False}
+
+
+async def test_send_frame_roundtrip_and_audit(tmp_path):
+    """send_frame: 原始帧发到 listener 收到响应; 发送前完整帧落审计 (D5)。"""
+    from plctap.listener import ListenerRegistry
+
+    log = tmp_path / "audit.jsonl"
+    app = create_app(
+        PlctapConfig(allow_write=True, audit_log=log, default_timeout_ms=2000)
+    )
+    registry = ListenerRegistry()
+    info = await registry.start("modbus", "127.0.0.1", 0, "respond_normal")
+    port = info["port"]
+    try:
+        async with Client(app) as client:
+            result = await client.call_tool(
+                "send_frame",
+                {"protocol": "modbus", "host": "127.0.0.1", "port": port, "frame_hex": REQ_FC3},
+            )
+        data = result.data
+        assert data.sent_frame == REQ_FC3
+        assert data.received_frame  # listener 回了最小正常响应
+    finally:
+        await registry.stop(port)
+    text = log.read_text(encoding="utf-8")
+    assert "send_frame" in text and REQ_FC3 in text
