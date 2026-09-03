@@ -72,6 +72,11 @@ class FakeSlave:
                     writer.write(head[:4] + struct.pack(">H", 100) + head[6:7] + bytes([fc, 0]))
                     await writer.drain()
                     continue
+                if fc in (5, 6):
+                    # 写请求: 响应为请求 PDU 的逐字节回显 (规范 6.5/6.6 节)
+                    writer.write(head[:4] + struct.pack(">H", len(rest) + 1) + head[6:7] + rest)
+                    await writer.drain()
+                    continue
                 _addr, qty = struct.unpack_from(">HH", rest, 1)
                 data = b"".join(struct.pack(">H", (_addr + i) * 3 + 7) for i in range(qty))
                 pdu = struct.pack(">BB", fc, len(data)) + data
@@ -281,3 +286,41 @@ async def test_register_table_exposes_modbus():
     from plctap.protocols.base import known_protocols
 
     assert "modbus" in known_protocols()
+
+async def test_write_register_roundtrip(slave_factory):
+    """fc06 写保持寄存器: 响应为请求回显, 返回含请求帧。"""
+    s = await slave_factory("normal")
+    adapter, _ = make_adapter()
+    out = await adapter.write(make_target(s.port), address=42, values=[0xABCD])
+    assert out["request_frame"] == out["response_frame"]
+    assert out["request_frame"].endswith("06" + "002a" + "abcd")
+
+
+async def test_write_coil_wire_value(slave_factory):
+    """fc05 线圈应用值 1 -> 线上 0xFF00 (规范 6.5 节)。"""
+    s = await slave_factory("normal")
+    adapter, _ = make_adapter()
+    out = await adapter.write(make_target(s.port), address=7, values=[1], point_type="coil")
+    assert "0500" in out["request_frame"] and "07ff00" in out["request_frame"]
+
+
+async def test_write_on_frame_called_before_send(slave_factory):
+    """on_frame 在发送前收到完整请求帧 (审计契约)。"""
+    s = await slave_factory("normal")
+    adapter, _ = make_adapter()
+    seen: list[str] = []
+    await adapter.write(make_target(s.port), address=1, values=[5], on_frame=seen.append)
+    assert len(seen) == 1 and len(seen[0]) == 24  # 12 字节帧 = 24 hex 字符
+
+
+async def test_write_exception_raises(slave_factory):
+    s = await slave_factory("exception")
+    adapter, _ = make_adapter()
+    with pytest.raises(ModbusError, match="ILLEGAL"):
+        await adapter.write(make_target(s.port), address=0, values=[1])
+
+
+async def test_write_invalid_point_type():
+    adapter, _ = make_adapter()
+    with pytest.raises(ValueError, match="point_type"):
+        await adapter.write(make_target(1), address=0, values=[1], point_type="bank")

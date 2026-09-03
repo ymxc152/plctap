@@ -103,14 +103,19 @@ async def test_unknown_protocol_rejected(tmp_path):
 
 
 async def test_audit_log_written_on_write_call(tmp_path):
-    """写审计不可关 (红线 2): 即便调用失败也必须先落审计。"""
+    """写审计不可关 (红线 2): 帧在发送前落审计, 连接失败也留痕真实帧。"""
     log = tmp_path / "audit.jsonl"
-    app = create_app(PlctapConfig(allow_write=True, audit_log=log))
+    app = create_app(
+        PlctapConfig(allow_write=True, audit_log=log, default_timeout_ms=150)
+    )
     async with Client(app) as client:
-        # modbus.write 尚未实现 (M3), 调用必然失败, 但审计应已记录
+        # 端口 1 无从站: 帧已构建并审计, 随后连接失败
         with pytest.raises(Exception):
             await client.call_tool(
                 "plc_write",
                 {"protocol": "modbus", "host": "127.0.0.1", "port": 1, "address": 0, "value": 1},
             )
-    assert log.exists() and "plc_write" in log.read_text(encoding="utf-8")
+    text = log.read_text(encoding="utf-8")
+    assert log.exists() and "plc_write" in text
+    # fc06 请求帧: MBAP(7B) + 06 + addr=0000 + value=0001 -> 含 "010600000001"
+    assert "010600000001" in text

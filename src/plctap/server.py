@@ -58,7 +58,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
                     "probe": True,
                     "read": True,
                     "write": config.allow_write,  # 写能力随闸门而变 (D5)
-                    "send_raw": config.allow_write,
+                    "send_raw": False,  # send_frame 工具 M3 注册前恒为 False (与实际一致)
                 }
                 for name in known_protocols()
             },
@@ -213,18 +213,30 @@ def _register_write_tools(
         address: int,
         value: int,
         unit: int = 1,
+        point_type: str = "register",
+        timeout_ms: int | None = None,
     ) -> dict:
-        """写单个线圈 (fc05) 或寄存器 (fc06)。危险操作: 需要用户明确授权。"""
-        audit.record(
-            tool="plc_write",
-            target=f"{protocol}://{host}:{port} unit={unit}",
-            frame_hex=f"addr={address} value={value}",
-        )
+        """写单个数据点 (危险操作: 需要用户明确授权)。
+
+        point_type: "register"=fc06 写保持寄存器 / "coil"=fc05 写线圈;
+        value 对线圈只接受 0/1 (线上为 0x0000/0xFF00)。
+        返回 {"request_frame", "response_frame", "elapsed_ms"};
+        完整请求帧在发送前写入审计日志 (D5: 失败也留痕)。
+        """
+        if point_type not in ("coil", "register"):
+            raise ValueError(f"point_type must be 'coil'|'register', got {point_type!r}")
         adapter = adapter_for(protocol)(pool, config)
         return await adapter.write(
             Target(protocol=protocol, host=host, port=port, unit=unit),
             address,
             [value],
+            on_frame=lambda hexstr: audit.record(
+                tool="plc_write",
+                target=f"{protocol}://{host}:{port} unit={unit}",
+                frame_hex=hexstr,
+            ),
+            point_type=point_type,
+            timeout_ms=timeout_ms,
         )
 
 
@@ -236,3 +248,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

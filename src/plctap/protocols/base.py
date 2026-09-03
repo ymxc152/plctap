@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import ClassVar, TypeVar
+from typing import Callable, ClassVar, TypeVar
 
 from plctap.conn.manager import ConnectionKey, ConnectionPool
 from plctap.config import PlctapConfig
@@ -61,8 +61,21 @@ class ProtocolAdapter(ABC):
     ) -> ReadResult:
         """读数据点。count 语义由适配器定义 (Modbus: 寄存器个数)。"""
 
-    async def write(self, target: Target, address: int, values: list[int]) -> None:
-        """写数据点 (M3, allow_write 闸门后注册)。基类默认拒绝。"""
+    async def write(
+        self,
+        target: Target,
+        address: int,
+        values: list[int],
+        *,
+        on_frame: "Callable[[str], None] | None" = None,
+        point_type: str = "register",
+        timeout_ms: int | None = None,
+    ) -> dict:
+        """写单个数据点, 返回 {"request_frame", "response_frame", "elapsed_ms"}。
+
+        on_frame 在帧构建后、发送前被调用 (审计红线 2: 失败也留痕)。
+        point_type 语义由适配器定义 (Modbus: "coil"=fc05 / "register"=fc06)。
+        """
         raise NotImplementedError(f"{self.name} write not implemented yet (M3)")
 
     @abstractmethod
@@ -98,3 +111,4 @@ async def recv_exact(
 ) -> bytes:
     """定长读取, 统一包 wait_for 超时 (D3)。EOF 抛 IncompleteReadError。"""
     return await asyncio.wait_for(reader.readexactly(n), timeout)
+

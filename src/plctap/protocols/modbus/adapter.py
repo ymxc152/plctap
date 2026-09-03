@@ -205,6 +205,54 @@ class ModbusAdapter(ProtocolAdapter):
             elapsed_ms=elapsed_ms,
         )
 
+    # ------------------------------------------------------------ write (M1 P2 修复: 审计真实帧)
+
+    async def write(
+        self,
+        target: Target,
+        address: int,
+        values: list[int],
+        *,
+        on_frame: Callable[[str], None] | None = None,
+        point_type: str = "register",
+        timeout_ms: int | None = None,
+    ) -> dict:
+        """fc05 写单线圈 / fc06 写单寄存器 (响应为请求的逐字节回显)。
+
+        on_frame 在帧构建后、任何网络动作前被调用 —— 审计先于发送,
+        即使后续连接失败, 该次写意图与完整帧也已留痕 (D5/红线 2)。
+        """
+        if point_type == "coil":
+            fc = codec.WRITE_SINGLE_COIL
+        elif point_type == "register":
+            fc = codec.WRITE_SINGLE_REGISTER
+        else:
+            raise ValueError(f"point_type must be 'coil'|'register', got {point_type!r}")
+        if len(values) != 1:
+            raise ValueError("fc05/fc06 writes exactly one value; values length must be 1")
+        tid = next(_transaction_ids)
+        request = codec.build_write_single(tid, target.unit, fc, address, values[0])
+        if on_frame is not None:
+            on_frame(request.hex())
+        timeout = self.timeout(timeout_ms)
+        started = time.perf_counter()
+        resp = await self._exchange(target, request, timeout)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        parsed = codec.parse_response(resp, request=request)
+        fc_field = next(f for f in parsed.fields if f.name == "function_code")
+        if isinstance(fc_field.value, int) and fc_field.value & codec.EXCEPTION_FLAG:
+            exc = next((f.value for f in parsed.fields if f.name == "exception_code"), 0)
+            raise ModbusError(
+                f"device returned exception {codec.exception_name(int(exc))} (0x{int(exc):02x})"
+                f" for fc{fc} address={address} value={values[0]}"
+            )
+        if not parsed.valid:
+            raise ModbusError("malformed write response: " + "; ".join(parsed.errors))
+        return {
+            "request_frame": request.hex(),
+            "response_frame": resp.hex(),
+            "elapsed_ms": elapsed_ms,
+        }
     # ------------------------------------------------------------ 会话
 
     async def _exchange(
@@ -252,3 +300,4 @@ class ModbusAdapter(ProtocolAdapter):
 class ModbusError(RuntimeError):
     """设备返回异常响应或畸形响应时的工具层错误。消息只含事实与异常码
     名称, 叙述性解释由 Agent + Skill 层完成 (D4)。"""
+
