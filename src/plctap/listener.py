@@ -44,6 +44,7 @@ class _Listener:
     frames: list[dict] = field(default_factory=list)
     sent: int = 0
     started_at: float = field(default_factory=time.time)
+    tasks: set[asyncio.Task] = field(default_factory=set)  # 活跃连接 handler
 
 
 class ListenerRegistry:
@@ -75,7 +76,12 @@ class ListenerRegistry:
         async def _handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
             await self._serve(lst, reader, writer, float(idle_timeout_sec))
 
-        server = await asyncio.start_server(_handler, host, port)
+        def _spawn(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            t = asyncio.ensure_future(_handler(reader, writer))
+            lst.tasks.add(t)
+            t.add_done_callback(lst.tasks.discard)
+
+        server = await asyncio.start_server(_spawn, host, port)
         actual_port = server.sockets[0].getsockname()[1]
         lst = _Listener(
             protocol=protocol,
@@ -100,6 +106,10 @@ class ListenerRegistry:
         if lst is None:
             raise ValueError(f"no listener on port {port}")
         lst.server.close()
+        for t in list(lst.tasks):
+            t.cancel()
+        await asyncio.gather(*lst.tasks, return_exceptions=True)
+        lst.tasks.clear()
         await lst.server.wait_closed()
         return {
             "status": "stopped",

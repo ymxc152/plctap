@@ -1,0 +1,140 @@
+# M2 语料补齐 (第四/五档): FINS/MELSEC 专项 + 主动探测归因
+# 帧全部由本仓库 codec 构造 (红线 1); probe 用例走 diagnose 的 probe_result 入口
+# expect 判分语义与 modbus_m2.yaml 相同 (关键词任一命中)
+- id: fins_end_code_1101
+  tier: fins_melsec
+  protocol: fins
+  input: { frame_hex: "46494e53000000160000000400000000c000020000000002000101011101" }
+  expect:
+    symptom_keywords: ["地址超出范围"]
+    cause_keywords: ["存储区边界"]
+- id: fins_end_code_0205
+  tier: fins_melsec
+  protocol: fins
+  input: { frame_hex: "46494e53000000160000000400000000c000020000000002000101010205" }
+  expect:
+    symptom_keywords: ["服务被拒绝"]
+    cause_keywords: ["本地模式"]
+- id: fins_tcp_error_nonzero
+  tier: fins_melsec
+  protocol: fins
+  input: { frame_hex: "46494e5300000012000000040000000100000000000000000000" }
+  expect:
+    symptom_keywords: ["错误字段非 0"]
+    cause_keywords: ["TCP 层拒绝"]
+- id: fins_magic_wrong
+  tier: fins_melsec
+  protocol: fins
+  input: { frame_hex: "58585858000000160000000400000000c000020000000002000101010000" }
+  expect:
+    symptom_keywords: ["魔数"]
+    cause_keywords: ["FINS/TCP 服务"]
+- id: fins_tcp_length_inconsistent
+  tier: fins_melsec
+  protocol: fins
+  input: { frame_hex: "46494e530000270f0000000400000000c000020000000002000101010000" }
+  expect:
+    symptom_keywords: ["长度字段与实际不符"]
+    cause_keywords: ["粘包"]
+- id: fins_tcp_command_unknown
+  tier: fins_melsec
+  protocol: fins
+  input: { frame_hex: "46494e5300000012000000990000000000000000000000000000" }
+  expect:
+    symptom_keywords: ["命令码未知"]
+    cause_keywords: ["非标准实现"]
+- id: fins_handshake_refused
+  tier: fins_melsec
+  protocol: fins
+  input:
+    frame_hex:
+      - "46494e530000000c000000000000000000000001"
+      - "46494e530000000c000000020000000000000000"
+  expect:
+    symptom_keywords: ["连接拒绝"]
+    cause_keywords: ["节点冲突"]
+- id: fins_sid_mismatch
+  tier: fins_melsec
+  protocol: fins
+  input:
+    frame_hex:
+      - "46494e530000001a0000000400000000800002000000000200010101820064000002"
+      - "46494e530000001a0000000400000000c00002000000000200fe0101000000120034"
+  expect:
+    symptom_keywords: ["SID 与请求"]
+    cause_keywords: ["串包"]
+- id: melsec_end_code_c04f
+  tier: fins_melsec
+  protocol: melsec
+  input: { frame_hex: "00500000ff0300000002004fc0" }
+  expect:
+    symptom_keywords: ["超出允许范围"]
+    cause_keywords: ["参数化范围"]
+- id: melsec_end_code_c059
+  tier: fins_melsec
+  protocol: melsec
+  input: { frame_hex: "00500000ff03000000020059c0" }
+  expect:
+    symptom_keywords: ["数据代码错误"]
+    cause_keywords: ["ASCII"]
+- id: melsec_data_length_inconsistent
+  tier: fins_melsec
+  protocol: melsec
+  input: { frame_hex: "00500000ff03000000e7030000" }
+  expect:
+    symptom_keywords: ["数据长度字段与实际不符"]
+    cause_keywords: ["粘包"]
+- id: melsec_subheader_wrong
+  tier: fins_melsec
+  protocol: melsec
+  input: { frame_hex: "51000000ff0300000002000000" }
+  expect:
+    symptom_keywords: ["副头部不是 0x5000"]
+    cause_keywords: ["ASCII 3E"]
+- id: probe_connection_refused
+  tier: active_probe
+  protocol: modbus
+  input:
+    probe:
+      failure_class: "connection_refused"
+  expect:
+    symptom_keywords: ["连接被拒绝"]
+    cause_keywords: ["无人监听"]
+- id: probe_timeout
+  tier: active_probe
+  protocol: modbus
+  input:
+    probe:
+      failure_class: "timeout"
+  expect:
+    symptom_keywords: ["连接超时"]
+    cause_keywords: ["防火墙"]
+- id: probe_connected_but_no_reply
+  tier: active_probe
+  protocol: modbus
+  input:
+    probe:
+      failure_class: "connected_but_no_reply"
+  expect:
+    symptom_keywords: ["不应答"]
+    cause_keywords: ["协议不对"]
+- id: probe_exc02_modbus
+  tier: active_probe
+  protocol: modbus
+  input:
+    probe:
+      failure_class: "exception_response"
+      exception_code: 2
+  expect:
+    symptom_keywords: ["设备回了异常"]
+    cause_keywords: ["应用层拒绝"]
+- id: probe_exc_busy
+  tier: active_probe
+  protocol: modbus
+  input:
+    probe:
+      failure_class: "exception_response"
+      exception_code: 6
+  expect:
+    symptom_keywords: ["设备回了异常"]
+    cause_keywords: ["应用层拒绝"]

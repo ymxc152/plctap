@@ -33,7 +33,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 from plctap.diag.engine import diagnose  # noqa: E402
 from plctap.models import DiagnosticReport  # noqa: E402
 
-DEFAULT_CORPUS = _REPO_ROOT / "eval" / "corpus" / "modbus_m2.yaml"
+DEFAULT_CORPUS = _REPO_ROOT / "eval" / "corpus"
 
 _PROMPT_TEMPLATE = """你是工业现场的诊断助手。协议: {protocol}。
 请根据以下通信证据判断故障, 只输出 JSON 数组, 每个问题一个对象:
@@ -44,16 +44,34 @@ _PROMPT_TEMPLATE = """你是工业现场的诊断助手。协议: {protocol}。
 
 
 def load_corpus(path: Path) -> list[dict[str, Any]]:
-    with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """语料文件或目录 (目录时合并全部 yaml, 按文件名字典序)。"""
+    if path.is_dir():
+        entries: list[dict[str, Any]] = []
+        for f in sorted(path.glob("*.yaml")):
+            entries.extend(yaml.safe_load(f.read_text(encoding="utf-8")))
+        return entries
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def run_entry(entry: dict[str, Any]) -> DiagnosticReport:
     inp = entry.get("input", {})
+    probe = inp.get("probe")
+    probe_result = None
+    if probe:
+        from plctap.models import ProbeResult
+
+        # P3 语义: exception_response = 设备在线 (传输层可达)
+        reachable = probe.get("failure_class") == "exception_response"
+        probe_result = ProbeResult(reachable=reachable, **probe)
     return diagnose(
         entry["protocol"],
-        frames_hex=[inp["frame_hex"]] if inp.get("frame_hex") else None,
+        frames_hex=(
+            [inp["frame_hex"]] if isinstance(inp.get("frame_hex"), str)
+            else (inp["frame_hex"] or None) if inp.get("frame_hex")
+            else None
+        ),
         log_snippet=inp.get("log_snippet"),
+        probe_result=probe_result,
     )
 
 
@@ -120,7 +138,14 @@ def export_prompts(corpus: list[dict[str, Any]], out_path: Path) -> int:
     with out_path.open("w", encoding="utf-8") as f:
         for entry in corpus:
             inp = entry.get("input", {})
-            evidence = inp.get("frame_hex") or inp.get("log_snippet") or ""
+            if inp.get("probe"):
+                pr = inp["probe"]
+                evidence = (
+                    f"probe_device 结果: failure_class={pr['failure_class']}"
+                    + (f", exception_code=0x{pr['exception_code']:x}" if pr.get("exception_code") else "")
+                )
+            else:
+                evidence = inp.get("frame_hex") or inp.get("log_snippet") or ""
             grading = {
                 k: v
                 for k, v in entry.get("expect", {}).items()
