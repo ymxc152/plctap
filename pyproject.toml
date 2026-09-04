@@ -1,6 +1,6 @@
 [project]
 name = "plctap"
-version = "0.1.0"
+version = "0.1.1"
 description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC PLCs"
 readme = "README.md"
 license = "MIT"
@@ -68,3 +68,4 @@ exclude = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
