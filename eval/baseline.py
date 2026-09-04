@@ -23,8 +23,9 @@ from typing import Any
 
 
 def _keywords_hit(keywords: list[str], text: str) -> bool:
+    """与 benchmark._keywords_hit 同语义: 条目内 | 分隔为等价写法组。"""
     t = text.lower()
-    return any(k.lower() in t for k in keywords)
+    return any(a.lower() in t for k in keywords for a in k.split("|"))
 
 
 def score_answer(grading: dict[str, Any], answer: list[dict[str, Any]] | None, raw: str) -> tuple[bool, list[str]]:
@@ -57,40 +58,79 @@ def parse_model_output(raw: str) -> list[dict[str, Any]] | None:
         return None
     try:
         data = json.loads(s[start : end + 1])
-        return data if isinstance(data, list) else None
     except json.JSONDecodeError:
         return None
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        # 容忍对象包装: {"candidates":[...]} 或单个 {"symptom":...}
+        if isinstance(data.get("candidates"), list):
+            return data["candidates"]
+        if "symptom" in data or "root_cause" in data:
+            return [data]
+    return None
 
 
-def call_model(prompt: str, model: str, timeout: int = 60) -> str:
-    """Responses API (stdlib 调用, 不引入依赖)。"""
+def call_model(prompt: str, model: str, timeout: int = 180) -> str:
+    """Responses API (stdlib 调用, 不引入依赖)。
+
+    支持 OpenAI 官方或任意兼容端点:
+      PLCTAP_BASELINE_BASE_URL  默认 https://api.openai.com/v1
+      OPENAI_API_KEY            鉴权 key
+    部分兼容端点不接受 temperature —— 400 时自动去参重试。
+    """
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
         raise SystemExit("OPENAI_API_KEY not set")
-    body = json.dumps({
-        "model": model,
-        "input": prompt,
-        "temperature": 0,
-    }).encode()
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=body,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read())
-    return data["output_text"]
+    base = os.environ.get("PLCTAP_BASELINE_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    url = f"{base}/responses"
+
+    def _post(body_dict: dict[str, Any]) -> dict[str, Any]:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body_dict).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+
+    try:
+        data = _post({"model": model, "input": prompt, "temperature": 0})
+    except urllib.error.HTTPError as e:
+        if e.code == 400:  # 兼容端点可能不支持 temperature
+            data = _post({"model": model, "input": prompt})
+        else:
+            raise
+    if data.get("output_text"):
+        return data["output_text"]
+    # 兼容无 output_text 快捷字段的实现: 从 output 数组提取文本
+    texts = []
+    for item in data.get("output", []):
+        for part in item.get("content", []):
+            if part.get("type") in ("output_text", "text"):
+                texts.append(part.get("text", ""))
+    return "".join(texts)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="plctap 裸模型基线评测")
     ap.add_argument("--prompts", type=Path, default=Path("eval/prompts.jsonl"))
     ap.add_argument("--answers", type=Path, default=None, help="离线模式: 预录答案 JSONL {id, raw}")
+    ap.add_argument("--only-missing", action="store_true",
+                    help="续跑: 合并已有 results_baseline.json, 只重调 raw 为空的用例")
     ap.add_argument("--out", type=Path, default=Path("eval/results_baseline.json"))
     args = ap.parse_args()
 
     records = [json.loads(l) for l in args.prompts.read_text(encoding="utf-8").splitlines() if l.strip()]
     answers: dict[str, str] = {}
+    prev_results: dict[str, dict] = {}
+    if args.only_missing and args.out.exists():
+        prev = json.loads(args.out.read_text(encoding="utf-8"))
+        prev_results = prev.get("details", {})
+        for cid, r in prev_results.items():
+            if r.get("raw"):
+                answers[cid] = r["raw"]
+        print(f"resume: {len(answers)}/{len(records)} already answered")
     if args.answers:
         for line in args.answers.read_text(encoding="utf-8").splitlines():
             if line.strip():
@@ -99,16 +139,22 @@ def main() -> int:
         print(f"offline mode: {len(answers)} pre-recorded answers")
     else:
         model = os.environ.get("PLCTAP_BASELINE_MODEL", "gpt-4.1-mini")
-        print(f"baseline model: {model}")
+        print(f"baseline model: {model} @ {os.environ.get('PLCTAP_BASELINE_BASE_URL', 'https://api.openai.com/v1')}")
         for rec in records:
+            if rec["id"] in answers:
+                continue
             t0 = time.time()
-            try:
-                answers[rec["id"]] = call_model(rec["prompt"], model)
-                print(f"  {rec['id']}: {time.time()-t0:.1f}s")
-                time.sleep(1.0)  # 温和限速
-            except Exception as e:  # noqa: BLE001
-                print(f"  {rec['id']}: ERROR {e}")
-                answers[rec["id"]] = ""
+            for attempt in (1, 2):  # 网络超时重试一次
+                try:
+                    answers[rec["id"]] = call_model(rec["prompt"], model)
+                    print(f"  {rec['id']}: {time.time()-t0:.1f}s (attempt {attempt})", flush=True)
+                    time.sleep(1.0)  # 温和限速
+                    break
+                except Exception as e:  # noqa: BLE001
+                    print(f"  {rec['id']}: ERROR (attempt {attempt}) {e}", flush=True)
+                    if attempt == 2:
+                        answers[rec["id"]] = ""
+                    time.sleep(3.0)
 
     tiers: dict[str, list[str]] = {}
     results: dict[str, dict[str, Any]] = {}
@@ -122,6 +168,7 @@ def main() -> int:
         results[rec["id"]] = {
             "tier": rec["tier"], "pass": ok,
             "answer": (parsed or [{}])[0] if parsed else None,
+            "raw": raw,
             "problems": problems,
         }
 

@@ -76,7 +76,11 @@ def run_entry(entry: dict[str, Any]) -> DiagnosticReport:
 
 
 def _keywords_hit(keywords: list[str], texts: list[str], require_all: bool) -> bool:
-    hits = [any(k in t for t in texts) for k in keywords]
+    """关键词命中。条目内的 | 分隔为同一问题的等价写法组 (KB 预定文案 vs
+    裸模型自然措辞), 组内任一命中即算覆盖该问题; require_all 时全部问题
+    都须覆盖, 否则任一命中即通过。"""
+    alts = [k.split("|") for k in keywords]
+    hits = [any(a in t for a in alt_k for t in texts) for alt_k in alts]
     return all(hits) if require_all else any(hits)
 
 

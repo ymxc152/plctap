@@ -33,6 +33,13 @@ uv run python eval/baseline.py --answers answers.jsonl
 
 输出: 分档准确率 + `eval/results_baseline.json` (README 对比表数据源)。
 
+## 已发布结果 (2026-09-04)
+
+- 基线: glm-5.3-flash @ 本地 Responses 兼容端点, temperature 0
+- 工具 35/35 vs 裸模型 24/35; 分档: 8/8, 4/5, 4/5, 5/12, 5/5
+- 6 例端点超时计 FAIL (披露于 README); 判分关键词为事实等价集 (| 语法),
+  benchmark/baseline 两处实现已同步
+
 ## README 对比表纪律 (M3)
 
 - 必须注明: 基线模型名、日期、语料版本 (git hash)、判分方式

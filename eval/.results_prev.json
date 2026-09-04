@@ -1,0 +1,423 @@
+{
+ "total": 35,
+ "passed": 5,
+ "tiers": {
+  "active_probe": {
+   "pass": 0,
+   "total": 5
+  },
+  "batch_log": {
+   "pass": 1,
+   "total": 5
+  },
+  "fins_melsec": {
+   "pass": 0,
+   "total": 12
+  },
+  "integrity_crc": {
+   "pass": 1,
+   "total": 5
+  },
+  "single_frame_tcp": {
+   "pass": 3,
+   "total": 8
+  }
+ },
+ "details": {
+  "fins_end_code_1101": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "fins_end_code_0205": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "fins_tcp_error_nonzero": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "fins_magic_wrong": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "fins_tcp_length_inconsistent": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "fins_tcp_command_unknown": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": {
+    "symptom": "FINS/TCP帧头合法(46 49 4E 53 = 'FINS'),但命令码为0x00000099,不属于任何已定义命令(有效范围0x00000000–0x0000000A);且长度字段声明0x12=18字节,与实际负载22字节不符,PLC将拒绝或丢弃该帧,导致连接无法建立或通信中断",
+    "root_cause": "客户端发送了畸形/非法的FINS/TCP控制帧:命令码0x99未定义,可能源于客户端协议实现错误、程序缺陷、报文在传输中被损坏,或非FINS应用误连FINS/TCP端口(9600)",
+    "suggested_action": "抓取完整TCP交互报文核对客户端组帧逻辑,确认命令码使用规范值(连接请求00000000、节点地址发送00000002、FINS帧发送00000004等);核对长度字段与实际字节数是否一致;检查并升级/修正客户端FINS通信库或程序;排查中间设备(防火墙/NAT/代理)是否篡改报文;用官方示例程序做对比验证"
+   },
+   "raw": "[\n  {\n    \"symptom\": \"FINS/TCP帧头合法(46 49 4E 53 = 'FINS'),但命令码为0x00000099,不属于任何已定义命令(有效范围0x00000000–0x0000000A);且长度字段声明0x12=18字节,与实际负载22字节不符,PLC将拒绝或丢弃该帧,导致连接无法建立或通信中断\",\n    \"root_cause\": \"客户端发送了畸形/非法的FINS/TCP控制帧:命令码0x99未定义,可能源于客户端协议实现错误、程序缺陷、报文在传输中被损坏,或非FINS应用误连FINS/TCP端口(9600)\",\n    \"suggested_action\": \"抓取完整TCP交互报文核对客户端组帧逻辑,确认命令码使用规范值(连接请求00000000、节点地址发送00000002、FINS帧发送00000004等);核对长度字段与实际字节数是否一致;检查并升级/修正客户端FINS通信库或程序;排查中间设备(防火墙/NAT/代理)是否篡改报文;用官方示例程序做对比验证\"\n  }\n]",
+   "problems": [
+    "symptom keywords miss: \"FINS/TCP帧头合法(46 49 4E 53 = 'FINS'),但命令码为0x00000099,不属于任何已定义命令(有效范围0x00000000–0x0000000A);且长度字段声明0x12=18字节,与实际负载22字节不符,PLC将拒绝或丢弃该帧,导致连接无法建立或通信中断\"",
+    "cause keywords miss: '客户端发送了畸形/非法的FINS/TCP控制帧:命令码0x99未定义,可能源于客户端协议实现错误、程序缺陷、报文在传输中被损坏,或非FINS应用误连FINS/TCP端口(9600)'"
+   ]
+  },
+  "fins_handshake_refused": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "fins_sid_mismatch": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "melsec_end_code_c04f": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "melsec_end_code_c059": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "melsec_data_length_inconsistent": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "melsec_subheader_wrong": {
+   "tier": "fins_melsec",
+   "pass": false,
+   "answer": null,
+   "raw": "",
+   "problems": [
+    "expected candidates, model returned []"
+   ]
+  },
+  "probe_connection_refused": {
+   "tier": "active_probe",
+   "pass": false,
+   "answer": {
+    "symptom": "设备探测失败，TCP 连接被目标主动拒绝（connection_refused）",
+    "root_cause": "目标设备的 Modbus TCP 服务未在监听（如 502 端口未开启、Modbus 服务未启用或服务异常），或设备并发连接数已达上限、防火墙/访问控制主动拒绝连接",
+    "suggested_action": "核对目标 IP 与端口（Modbus TCP 默认 502）配置；确认设备 Modbus TCP 服务已启用，必要时重启设备或 Modbus 服务；检查设备最大并发连接数限制及防火墙规则；用 telnet/nc 测试 502 端口是否开放以进一步定位"
+   },
+   "raw": "[\n  {\n    \"symptom\": \"设备探测失败，TCP 连接被目标主动拒绝（connection_refused）\",\n    \"root_cause\": \"目标设备的 Modbus TCP 服务未在监听（如 502 端口未开启、Modbus 服务未启用或服务异常），或设备并发连接数已达上限、防火墙/访问控制主动拒绝连接\",\n    \"suggested_action\": \"核对目标 IP 与端口（Modbus TCP 默认 502）配置；确认设备 Modbus TCP 服务已启用，必要时重启设备或 Modbus 服务；检查设备最大并发连接数限制及防火墙规则；用 telnet/nc 测试 502 端口是否开放以进一步定位\"\n  }\n]",
+   "problems": [
+    "symptom keywords miss: '设备探测失败，TCP 连接被目标主动拒绝（connection_refused）'",
+    "cause keywords miss: '目标设备的 Modbus TCP 服务未在监听（如 502 端口未开启、Modbus 服务未启用或服务异常），或设备并发连接数已达上限、防火墙/访问控制主动拒绝连接'"
+   ]
+  },
+  "probe_timeout": {
+   "tier": "active_probe",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus 设备探测超时（probe_device failure_class=timeout），从站在规定时间内未返回响应帧",
+    "root_cause": "从站无响应，常见原因：从站地址/波特率/校验位配置不匹配、RS485 A/B 线接反或接线松动、设备断电或离线、总线被占用或干扰；若为 Modbus TCP 则可能是 IP/端口(502)错误或网络不通",
+    "suggested_action": "1) 确认从站供电及运行状态；2) 核对主站与从站的从站地址、波特率、数据位、校验位、停止位设置一致；3) 检查 RS485 A/B 接线极性、屏蔽接地及 120Ω 终端电阻；4) 若为 Modbus TCP，ping 目标 IP 并核对端口 502 与防火墙规则；5) 排除总线冲突与强电干扰后重新探测"
+   },
+   "raw": "[{\"symptom\": \"Modbus 设备探测超时（probe_device failure_class=timeout），从站在规定时间内未返回响应帧\", \"root_cause\": \"从站无响应，常见原因：从站地址/波特率/校验位配置不匹配、RS485 A/B 线接反或接线松动、设备断电或离线、总线被占用或干扰；若为 Modbus TCP 则可能是 IP/端口(502)错误或网络不通\", \"suggested_action\": \"1) 确认从站供电及运行状态；2) 核对主站与从站的从站地址、波特率、数据位、校验位、停止位设置一致；3) 检查 RS485 A/B 接线极性、屏蔽接地及 120Ω 终端电阻；4) 若为 Modbus TCP，ping 目标 IP 并核对端口 502 与防火墙规则；5) 排除总线冲突与强电干扰后重新探测\"}]",
+   "problems": [
+    "symptom keywords miss: 'Modbus 设备探测超时（probe_device failure_class=timeout），从站在规定时间内未返回响应帧'",
+    "cause keywords miss: '从站无响应，常见原因：从站地址/波特率/校验位配置不匹配、RS485 A/B 线接反或接线松动、设备断电或离线、总线被占用或干扰；若为 Modbus TCP 则可能是 IP/端口(502)错误或网络不通'"
+   ]
+  },
+  "probe_connected_but_no_reply": {
+   "tier": "active_probe",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus 探测显示链路/TCP 连接成功，但发出请求后设备无任何应答（connected_but_no_reply），轮询超时",
+    "root_cause": "连接层正常但应用层无响应，常见原因：Unit ID（从站地址）不匹配；请求的功能码或寄存器地址不被设备支持且设备静默丢弃请求；若经网关转换，下游串口从站离线或波特率/校验位不匹配；设备应用层挂死（TCP 协议栈仍接受连接）；响应超时时间设置过短",
+    "suggested_action": "1) 核对并扫描 Unit ID/从站地址，确认目标从站存在；2) 对照设备手册确认所用功能码与寄存器地址在支持范围内；3) 增大响应超时（如 1000ms→3000ms）后重试；4) 若经网关，检查下游串口参数（波特率、校验、停止位）及从站接线和终端电阻；5) 检查设备运行状态（CPU 负载、固件是否挂死），必要时重启设备；6) 使用 Modbus 调试工具（如 mbpoll、ModScan）手动发送请求以隔离问题"
+   },
+   "raw": "[\n  {\n    \"symptom\": \"Modbus 探测显示链路/TCP 连接成功，但发出请求后设备无任何应答（connected_but_no_reply），轮询超时\",\n    \"root_cause\": \"连接层正常但应用层无响应，常见原因：Unit ID（从站地址）不匹配；请求的功能码或寄存器地址不被设备支持且设备静默丢弃请求；若经网关转换，下游串口从站离线或波特率/校验位不匹配；设备应用层挂死（TCP 协议栈仍接受连接）；响应超时时间设置过短\",\n    \"suggested_action\": \"1) 核对并扫描 Unit ID/从站地址，确认目标从站存在；2) 对照设备手册确认所用功能码与寄存器地址在支持范围内；3) 增大响应超时（如 1000ms→3000ms）后重试；4) 若经网关，检查下游串口参数（波特率、校验、停止位）及从站接线和终端电阻；5) 检查设备运行状态（CPU 负载、固件是否挂死），必要时重启设备；6) 使用 Modbus 调试工具（如 mbpoll、ModScan）手动发送请求以隔离问题\"\n  }\n]",
+   "problems": [
+    "symptom keywords miss: 'Modbus 探测显示链路/TCP 连接成功，但发出请求后设备无任何应答（connected_but_no_reply），轮询超时'",
+    "cause keywords miss: '连接层正常但应用层无响应，常见原因：Unit ID（从站地址）不匹配；请求的功能码或寄存器地址不被设备支持且设备静默丢弃请求；若经网关转换，下游串口从站离线或波特率/校验位不匹配；设备应用层挂死（TCP 协议栈仍接受连接）；响应超时时间设置过短'"
+   ]
+  },
+  "probe_exc02_modbus": {
+   "tier": "active_probe",
+   "pass": false,
+   "answer": {
+    "symptom": "probe_device 探测失败: 设备返回 Modbus 异常响应, exception_code=0x02 (Illegal Data Address)",
+    "root_cause": "请求的寄存器地址在从站设备中不存在或超出其支持的地址范围 (非法数据地址)。常见原因: 点表/寄存器映射配置错误、起始地址与数量越界、0基与1基地址约定混淆 (如 40001 对应地址 0)、或所用功能码与该地址区不匹配",
+    "suggested_action": "核对设备手册中的寄存器映射表, 确认探测请求的功能码、起始地址和数量均在设备允许范围内; 检查主站点表中该地址的配置并修正 0基/1基偏移; 修改后重新下发探测验证"
+   },
+   "raw": "[\n  {\n    \"symptom\": \"probe_device 探测失败: 设备返回 Modbus 异常响应, exception_code=0x02 (Illegal Data Address)\",\n    \"root_cause\": \"请求的寄存器地址在从站设备中不存在或超出其支持的地址范围 (非法数据地址)。常见原因: 点表/寄存器映射配置错误、起始地址与数量越界、0基与1基地址约定混淆 (如 40001 对应地址 0)、或所用功能码与该地址区不匹配\",\n    \"suggested_action\": \"核对设备手册中的寄存器映射表, 确认探测请求的功能码、起始地址和数量均在设备允许范围内; 检查主站点表中该地址的配置并修正 0基/1基偏移; 修改后重新下发探测验证\"\n  }\n]",
+   "problems": [
+    "symptom keywords miss: 'probe_device 探测失败: 设备返回 Modbus 异常响应, exception_code=0x02 (Illegal Data Address)'",
+    "cause keywords miss: '请求的寄存器地址在从站设备中不存在或超出其支持的地址范围 (非法数据地址)。常见原因: 点表/寄存器映射配置错误、起始地址与数量越界、0基与1基地址约定混淆 (如 40001 对应地址 0)、或所用功能码与该地址区不匹配'"
+   ]
+  },
+  "probe_exc_busy": {
+   "tier": "active_probe",
+   "pass": false,
+   "answer": {
+    "symptom": "探测设备时收到 Modbus 异常响应 (exception_code=0x06)",
+    "root_cause": "从站设备繁忙 (Slave Device Busy): 设备正在处理长耗时操作(如写非易失存储、校准、自检等), 暂时无法接受新请求",
+    "suggested_action": "采用退避策略延迟后重试请求; 确认设备是否在执行长耗时任务并等待其完成; 降低轮询频率, 避免在设备执行写存储等操作期间持续发送请求"
+   },
+   "raw": "[{\"symptom\": \"探测设备时收到 Modbus 异常响应 (exception_code=0x06)\", \"root_cause\": \"从站设备繁忙 (Slave Device Busy): 设备正在处理长耗时操作(如写非易失存储、校准、自检等), 暂时无法接受新请求\", \"suggested_action\": \"采用退避策略延迟后重试请求; 确认设备是否在执行长耗时任务并等待其完成; 降低轮询频率, 避免在设备执行写存储等操作期间持续发送请求\"}]",
+   "problems": [
+    "symptom keywords miss: '探测设备时收到 Modbus 异常响应 (exception_code=0x06)'",
+    "cause keywords miss: '从站设备繁忙 (Slave Device Busy): 设备正在处理长耗时操作(如写非易失存储、校准、自检等), 暂时无法接受新请求'"
+   ]
+  },
+  "tcp_req_ok": {
+   "tier": "single_frame_tcp",
+   "pass": true,
+   "answer": null,
+   "raw": "[]",
+   "problems": []
+  },
+  "tcp_resp_ok": {
+   "tier": "single_frame_tcp",
+   "pass": true,
+   "answer": null,
+   "raw": "[]",
+   "problems": []
+  },
+  "tcp_exc02_address": {
+   "tier": "single_frame_tcp",
+   "pass": false,
+   "answer": {
+    "symptom": "从站返回异常响应: 功能码0x83(读保持寄存器FC03异常), 异常码02",
+    "root_cause": "异常码02为非法数据地址(Illegal Data Address), 主站请求的保持寄存器起始地址或数量超出从站支持的地址范围",
+    "suggested_action": "核对该从站寄存器映射表, 确认FC03可访问的有效地址区间; 修改主站请求的起始地址和寄存器数量至合法范围后重新通信测试"
+   },
+   "raw": "[{\"symptom\": \"从站返回异常响应: 功能码0x83(读保持寄存器FC03异常), 异常码02\", \"root_cause\": \"异常码02为非法数据地址(Illegal Data Address), 主站请求的保持寄存器起始地址或数量超出从站支持的地址范围\", \"suggested_action\": \"核对该从站寄存器映射表, 确认FC03可访问的有效地址区间; 修改主站请求的起始地址和寄存器数量至合法范围后重新通信测试\"}]",
+   "problems": [
+    "symptom keywords miss: '从站返回异常响应: 功能码0x83(读保持寄存器FC03异常), 异常码02'",
+    "cause keywords miss: '异常码02为非法数据地址(Illegal Data Address), 主站请求的保持寄存器起始地址或数量超出从站支持的地址范围'"
+   ]
+  },
+  "tcp_exc03_value": {
+   "tier": "single_frame_tcp",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus TCP 收到功能码 03 的异常响应：0x83，异常码 0x03（Illegal Data Value）",
+    "root_cause": "从站认为 Read Holding Registers 请求参数非法，常见原因是起始地址、寄存器数量或请求参数超出从站支持范围/不符合设备要求",
+    "suggested_action": "核对 FC03 请求的寄存器起始地址、数量、数据格式和从站支持范围，修正主站请求参数后重新测试"
+   },
+   "raw": "[{\"symptom\": \"Modbus TCP 收到功能码 03 的异常响应：0x83，异常码 0x03（Illegal Data Value）\", \"root_cause\": \"从站认为 Read Holding Registers 请求参数非法，常见原因是起始地址、寄存器数量或请求参数超出从站支持范围/不符合设备要求\", \"suggested_action\": \"核对 FC03 请求的寄存器起始地址、数量、数据格式和从站支持范围，修正主站请求参数后重新测试\"}]",
+   "problems": [
+    "symptom keywords miss: 'Modbus TCP 收到功能码 03 的异常响应：0x83，异常码 0x03（Illegal Data Value）'",
+    "cause keywords miss: '从站认为 Read Holding Registers 请求参数非法，常见原因是起始地址、寄存器数量或请求参数超出从站支持范围/不符合设备要求'"
+   ]
+  },
+  "tcp_length_field_bad": {
+   "tier": "single_frame_tcp",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus TCP 响应帧长度异常：MBAP 长度字段为 0x0010，但实际后续数据只有 5 字节（01 03 02 00 00）",
+    "root_cause": "MBAP Length 字段与实际报文长度不一致，可能为设备/网关组包错误或抓包帧被截断",
+    "suggested_action": "重新抓取完整报文确认是否截断；若帧完整，则修正或升级 Modbus TCP 服务端/网关，使 Length 字段应为 0x0005"
+   },
+   "raw": "[{\"symptom\":\"Modbus TCP 响应帧长度异常：MBAP 长度字段为 0x0010，但实际后续数据只有 5 字节（01 03 02 00 00）\",\"root_cause\":\"MBAP Length 字段与实际报文长度不一致，可能为设备/网关组包错误或抓包帧被截断\",\"suggested_action\":\"重新抓取完整报文确认是否截断；若帧完整，则修正或升级 Modbus TCP 服务端/网关，使 Length 字段应为 0x0005\"}]",
+   "problems": [
+    "symptom keywords miss: 'Modbus TCP 响应帧长度异常：MBAP 长度字段为 0x0010，但实际后续数据只有 5 字节（01 03 02 00 00）'",
+    "cause keywords miss: 'MBAP Length 字段与实际报文长度不一致，可能为设备/网关组包错误或抓包帧被截断'"
+   ]
+  },
+  "tcp_protocol_id_bad": {
+   "tier": "single_frame_tcp",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus TCP 请求的 MBAP 协议标识符异常，字段值为 0x0005，标准应为 0x0000。",
+    "root_cause": "发送方构造的 MBAP 头部不符合 Modbus TCP 协议规范，协议标识符字段被错误填充。",
+    "suggested_action": "修改客户端/发送程序的 MBAP 协议标识符为 0x0000，并重新抓包验证请求能否被设备正常响应。"
+   },
+   "raw": "[{\"symptom\": \"Modbus TCP 请求的 MBAP 协议标识符异常，字段值为 0x0005，标准应为 0x0000。\", \"root_cause\": \"发送方构造的 MBAP 头部不符合 Modbus TCP 协议规范，协议标识符字段被错误填充。\", \"suggested_action\": \"修改客户端/发送程序的 MBAP 协议标识符为 0x0000，并重新抓包验证请求能否被设备正常响应。\"}]",
+   "problems": [
+    "cause keywords miss: '发送方构造的 MBAP 头部不符合 Modbus TCP 协议规范，协议标识符字段被错误填充。'"
+   ]
+  },
+  "tcp_unit_out_of_range": {
+   "tier": "single_frame_tcp",
+   "pass": true,
+   "answer": {
+    "symptom": "Modbus TCP 帧长度不一致：MBAP 长度字段声明 0x0006(6 字节)，但 Unit ID 之后实际仅有 5 字节(ff 03 02 00 00)，报文不完整/被截断",
+    "root_cause": "报文在传输过程中被截断(如 TCP 分段丢失、抓包不完整)，或设备/网关生成 MBAP 长度字段时计算错误；若按请求帧解析，功能码 03 的寄存器数量字段缺少低字节",
+    "suggested_action": "使用 Wireshark 完整抓包核对 TCP 流，检查是否存在分片、丢包或抓包截断；重试通信并对比正常响应(读保持寄存器响应长度应为 0x0005)；若持续出现，检查从站/网关固件的 MBAP 长度计算逻辑并升级固件"
+   },
+   "raw": "[{\"symptom\": \"Modbus TCP 帧长度不一致：MBAP 长度字段声明 0x0006(6 字节)，但 Unit ID 之后实际仅有 5 字节(ff 03 02 00 00)，报文不完整/被截断\", \"root_cause\": \"报文在传输过程中被截断(如 TCP 分段丢失、抓包不完整)，或设备/网关生成 MBAP 长度字段时计算错误；若按请求帧解析，功能码 03 的寄存器数量字段缺少低字节\", \"suggested_action\": \"使用 Wireshark 完整抓包核对 TCP 流，检查是否存在分片、丢包或抓包截断；重试通信并对比正常响应(读保持寄存器响应长度应为 0x0005)；若持续出现，检查从站/网关固件的 MBAP 长度计算逻辑并升级固件\"}]",
+   "problems": []
+  },
+  "tcp_unknown_fc": {
+   "tier": "single_frame_tcp",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus TCP 请求帧(事务ID=0x0006, 协议ID=0x0000, 单元ID=0x01)使用功能码 0x2F(47), 该功能码不属于 Modbus 标准定义(标准公共功能码为 0x01~0x18、0x2B), 数据域为 00000000, 从站大概率无法识别",
+    "root_cause": "主站/客户端发送了未定义或从站不支持的功能码 0x2F, 可能是主站程序实现错误、协议栈缺陷, 或误用了厂商私有功能码",
+    "suggested_action": "抓取从站响应确认是否返回异常帧(0xAF + 异常码 0x01 非法功能); 核对主站程序调用的功能码, 改用标准功能码(如 0x03 读保持寄存器、0x04 读输入寄存器、0x06/0x10 写寄存器); 查阅设备手册确认其支持的私有功能码范围后再调用"
+   },
+   "raw": "[{\"symptom\": \"Modbus TCP 请求帧(事务ID=0x0006, 协议ID=0x0000, 单元ID=0x01)使用功能码 0x2F(47), 该功能码不属于 Modbus 标准定义(标准公共功能码为 0x01~0x18、0x2B), 数据域为 00000000, 从站大概率无法识别\", \"root_cause\": \"主站/客户端发送了未定义或从站不支持的功能码 0x2F, 可能是主站程序实现错误、协议栈缺陷, 或误用了厂商私有功能码\", \"suggested_action\": \"抓取从站响应确认是否返回异常帧(0xAF + 异常码 0x01 非法功能); 核对主站程序调用的功能码, 改用标准功能码(如 0x03 读保持寄存器、0x04 读输入寄存器、0x06/0x10 写寄存器); 查阅设备手册确认其支持的私有功能码范围后再调用\"}]",
+   "problems": [
+    "cause keywords miss: '主站/客户端发送了未定义或从站不支持的功能码 0x2F, 可能是主站程序实现错误、协议栈缺陷, 或误用了厂商私有功能码'"
+   ]
+  },
+  "rtu_crc_bad": {
+   "tier": "integrity_crc",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus RTU 请求帧 CRC 校验失败：帧 01 03 00 00 00 01 84 F5 中，前 6 字节（从站 01，功能码 03，起始地址 0x0000，数量 1）计算出的正确 CRC 应为 84 0A，实际接收为 84 F5",
+    "root_cause": "报文在传输过程中发生位错误/数据损坏，典型原因：RS-485 总线电磁干扰、屏蔽或接地不良、终端电阻缺失或阻值不当、波特率/校验位配置不匹配、接线端子接触不良或线缆老化",
+    "suggested_action": "检查 RS-485 物理层：确认 A/B 线极性与接线牢固、总线两端加 120Ω 终端电阻、屏蔽层单点接地；核对主从站波特率、数据位、校验位配置一致；用示波器或串口分析仪观察信号质量，若 CRC 错误持续出现则更换线缆或增加电气隔离/中继器"
+   },
+   "raw": "[\n  {\n    \"symptom\": \"Modbus RTU 请求帧 CRC 校验失败：帧 01 03 00 00 00 01 84 F5 中，前 6 字节（从站 01，功能码 03，起始地址 0x0000，数量 1）计算出的正确 CRC 应为 84 0A，实际接收为 84 F5\",\n    \"root_cause\": \"报文在传输过程中发生位错误/数据损坏，典型原因：RS-485 总线电磁干扰、屏蔽或接地不良、终端电阻缺失或阻值不当、波特率/校验位配置不匹配、接线端子接触不良或线缆老化\",\n    \"suggested_action\": \"检查 RS-485 物理层：确认 A/B 线极性与接线牢固、总线两端加 120Ω 终端电阻、屏蔽层单点接地；核对主从站波特率、数据位、校验位配置一致；用示波器或串口分析仪观察信号质量，若 CRC 错误持续出现则更换线缆或增加电气隔离/中继器\"\n  }\n]",
+   "problems": [
+    "symptom keywords miss: 'Modbus RTU 请求帧 CRC 校验失败：帧 01 03 00 00 00 01 84 F5 中，前 6 字节（从站 01，功能码 03，起始地址 0x0000，数量 1）计算出的正确 CRC 应为 84 0A，实际接收为 84 F5'"
+   ]
+  },
+  "rtu_ok": {
+   "tier": "integrity_crc",
+   "pass": true,
+   "answer": null,
+   "raw": "[]",
+   "problems": []
+  },
+  "rtu_too_short": {
+   "tier": "integrity_crc",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus RTU 帧不完整：仅捕获到从站地址(0x01)和功能码(0x03 读保持寄存器)，缺少起始地址、寄存器数量及CRC校验字节",
+    "root_cause": "疑似串行链路异常导致帧截断，可能原因包括：RS-485接线松动或干扰、波特率/校验位主从不匹配、主站超时设置过短提前放弃接收，或抓包工具缓冲区截断",
+    "suggested_action": "检查RS-485接线、终端电阻与屏蔽接地；核对主从站波特率、数据位、奇偶校验配置一致；增大主站响应超时时间；重新抓取完整帧并校验CRC以确认链路恢复"
+   },
+   "raw": "[{\"symptom\": \"Modbus RTU 帧不完整：仅捕获到从站地址(0x01)和功能码(0x03 读保持寄存器)，缺少起始地址、寄存器数量及CRC校验字节\", \"root_cause\": \"疑似串行链路异常导致帧截断，可能原因包括：RS-485接线松动或干扰、波特率/校验位主从不匹配、主站超时设置过短提前放弃接收，或抓包工具缓冲区截断\", \"suggested_action\": \"检查RS-485接线、终端电阻与屏蔽接地；核对主从站波特率、数据位、奇偶校验配置一致；增大主站响应超时时间；重新抓取完整帧并校验CRC以确认链路恢复\"}]",
+   "problems": [
+    "symptom keywords miss: 'Modbus RTU 帧不完整：仅捕获到从站地址(0x01)和功能码(0x03 读保持寄存器)，缺少起始地址、寄存器数量及CRC校验字节'"
+   ]
+  },
+  "rtu_exc_shape_ok": {
+   "tier": "integrity_crc",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus 读保持寄存器失败：从站 01 返回功能码 83、异常码 02（非法数据地址）",
+    "root_cause": "请求的保持寄存器起始地址或地址范围超出从站支持的寄存器映射",
+    "suggested_action": "核对从站 Modbus 寄存器表，修正起始地址和寄存器数量，注意 0 基/1 基地址偏移，仅请求支持的地址范围后重试"
+   },
+   "raw": "[{\"symptom\": \"Modbus 读保持寄存器失败：从站 01 返回功能码 83、异常码 02（非法数据地址）\", \"root_cause\": \"请求的保持寄存器起始地址或地址范围超出从站支持的寄存器映射\", \"suggested_action\": \"核对从站 Modbus 寄存器表，修正起始地址和寄存器数量，注意 0 基/1 基地址偏移，仅请求支持的地址范围后重试\"}]",
+   "problems": [
+    "symptom keywords miss: 'Modbus 读保持寄存器失败：从站 01 返回功能码 83、异常码 02（非法数据地址）'"
+   ]
+  },
+  "rtu_exc_crc_bad": {
+   "tier": "integrity_crc",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus RTU 响应为异常帧：从站地址 01，功能码 0x83，异常码 0x02，表示读保持寄存器时从站返回 Illegal Data Address。",
+    "root_cause": "请求的保持寄存器地址或地址范围在从站设备中不存在或不可访问。",
+    "suggested_action": "核对该从站的 Modbus 寄存器映射表，确认功能码 03 使用的起始地址和寄存器数量是否正确，并调整主站请求地址范围。"
+   },
+   "raw": "[{\"symptom\": \"Modbus RTU 响应为异常帧：从站地址 01，功能码 0x83，异常码 0x02，表示读保持寄存器时从站返回 Illegal Data Address。\", \"root_cause\": \"请求的保持寄存器地址或地址范围在从站设备中不存在或不可访问。\", \"suggested_action\": \"核对该从站的 Modbus 寄存器映射表，确认功能码 03 使用的起始地址和寄存器数量是否正确，并调整主站请求地址范围。\"}]",
+   "problems": [
+    "symptom keywords miss: 'Modbus RTU 响应为异常帧：从站地址 01，功能码 0x83，异常码 0x02，表示读保持寄存器时从站返回 Illegal Data Address。'"
+   ]
+  },
+  "log_normal_flow": {
+   "tier": "batch_log",
+   "pass": true,
+   "answer": null,
+   "raw": "[]",
+   "problems": []
+  },
+  "log_tid_mismatch": {
+   "tier": "batch_log",
+   "pass": false,
+   "answer": {
+    "symptom": "响应事务标识符(0x0042)与请求事务标识符(0x0001)不匹配，主站可能丢弃该响应或误配对",
+    "root_cause": "主站或网关的事务ID管理异常：可能存在并发请求串扰、网关返回了缓存的旧响应，或主站事务ID未按请求递增",
+    "suggested_action": "核对主站事务ID生成/递增逻辑；检查网关是否存在多主站并发访问或响应缓存；重发请求并验证响应事务ID与请求一一对应"
+   },
+   "raw": "[\n  {\n    \"symptom\": \"响应事务标识符(0x0042)与请求事务标识符(0x0001)不匹配，主站可能丢弃该响应或误配对\",\n    \"root_cause\": \"主站或网关的事务ID管理异常：可能存在并发请求串扰、网关返回了缓存的旧响应，或主站事务ID未按请求递增\",\n    \"suggested_action\": \"核对主站事务ID生成/递增逻辑；检查网关是否存在多主站并发访问或响应缓存；重发请求并验证响应事务ID与请求一一对应\"\n  }\n]",
+   "problems": [
+    "symptom keywords miss: '响应事务标识符(0x0042)与请求事务标识符(0x0001)不匹配，主站可能丢弃该响应或误配对'"
+   ]
+  },
+  "log_truncated_resp": {
+   "tier": "batch_log",
+   "pass": false,
+   "answer": {
+    "symptom": "Modbus TCP 响应帧不完整：MBAP 长度字段声明 7 字节，但实际仅收到 5 字节；字节计数为 0x04（2 个寄存器），数据区却只有 0x0001（1 个寄存器），帧被截断",
+    "root_cause": "从站响应报文被截断或组包错误，可能原因包括网络丢包/链路不稳定、串口-网关转换设备缓冲异常，或从站固件生成的字节计数与实际数据长度不一致",
+    "suggested_action": "抓包确认完整响应帧；检查网络链路质量与网关/转换器工作状态；重试读取寄存器 0x0000-0x0001；若问题复现，检查从站固件版本并考虑升级，或降低通信速率/减小单次读取寄存器数量"
+   },
+   "raw": "[{\"symptom\": \"Modbus TCP 响应帧不完整：MBAP 长度字段声明 7 字节，但实际仅收到 5 字节；字节计数为 0x04（2 个寄存器），数据区却只有 0x0001（1 个寄存器），帧被截断\", \"root_cause\": \"从站响应报文被截断或组包错误，可能原因包括网络丢包/链路不稳定、串口-网关转换设备缓冲异常，或从站固件生成的字节计数与实际数据长度不一致\", \"suggested_action\": \"抓包确认完整响应帧；检查网络链路质量与网关/转换器工作状态；重试读取寄存器 0x0000-0x0001；若问题复现，检查从站固件版本并考虑升级，或降低通信速率/减小单次读取寄存器数量\"}]",
+   "problems": [
+    "symptom keywords miss: 'Modbus TCP 响应帧不完整：MBAP 长度字段声明 7 字节，但实际仅收到 5 字节；字节计数为 0x04（2 个寄存器），数据区却只有 0x0001（1 个寄存器），帧被截断'",
+    "cause keywords miss: '从站响应报文被截断或组包错误，可能原因包括网络丢包/链路不稳定、串口-网关转换设备缓冲异常，或从站固件生成的字节计数与实际数据长度不一致'"
+   ]
+  },
+  "log_exc_mixed_flow": {
+   "tier": "batch_log",
+   "pass": false,
+   "answer": {
+    "symptom": "读取保持寄存器(功能码03,起始地址0x0064=100,数量5)时从站返回异常响应(功能码0x83,异常码02 Illegal Data Address),请求被拒绝;而随后读取地址0x0000数量2的请求正常返回数据",
+    "root_cause": "从站(单元ID 01)中不存在地址100~104的保持寄存器,请求的地址范围未映射或地址配置错误(可能存在1-based/0-based偏移问题)",
+    "suggested_action": "核对该从站设备的寄存器映射表,确认地址100~104是否有效;检查主站配置是否存在地址偏移(如实际地址应为99或101);若该地址段确实不存在,将主站轮询地址修改为从站支持的有效寄存器范围"
+   },
+   "raw": "[{\"symptom\": \"读取保持寄存器(功能码03,起始地址0x0064=100,数量5)时从站返回异常响应(功能码0x83,异常码02 Illegal Data Address),请求被拒绝;而随后读取地址0x0000数量2的请求正常返回数据\", \"root_cause\": \"从站(单元ID 01)中不存在地址100~104的保持寄存器,请求的地址范围未映射或地址配置错误(可能存在1-based/0-based偏移问题)\", \"suggested_action\": \"核对该从站设备的寄存器映射表,确认地址100~104是否有效;检查主站配置是否存在地址偏移(如实际地址应为99或101);若该地址段确实不存在,将主站轮询地址修改为从站支持的有效寄存器范围\"}]",
+   "problems": [
+    "symptom keywords miss: '读取保持寄存器(功能码03,起始地址0x0064=100,数量5)时从站返回异常响应(功能码0x83,异常码02 Illegal Data Address),请求被拒绝;而随后读取地址0x0000数量2的请求正常返回数据'"
+   ]
+  },
+  "log_multi_issue_mix": {
+   "tier": "batch_log",
+   "pass": false,
+   "answer": {
+    "symptom": "TCP 连接被拒绝(conn refused at gw-01),无法建立 Modbus/TCP 会话",
+    "root_cause": "gw-01 上 Modbus TCP 服务未运行、监听端口不符(非默认502)或防火墙/ACL 拦截,导致连接请求被拒",
+    "suggested_action": "检查 gw-01 电源、服务进程与监听端口(默认502),核实防火墙/访问控制规则并放行客户端 IP,必要时重启网关"
+   },
+   "raw": "[\n  {\n    \"symptom\": \"TCP 连接被拒绝(conn refused at gw-01),无法建立 Modbus/TCP 会话\",\n    \"root_cause\": \"gw-01 上 Modbus TCP 服务未运行、监听端口不符(非默认502)或防火墙/ACL 拦截,导致连接请求被拒\",\n    \"suggested_action\": \"检查 gw-01 电源、服务进程与监听端口(默认502),核实防火墙/访问控制规则并放行客户端 IP,必要时重启网关\"\n  },\n  {\n    \"symptom\": \"请求事务ID为 0x0001,但收到的响应事务ID为 0x0042,应答与请求不匹配\",\n    \"root_cause\": \"收到陈旧/滞留的历史响应,或网关在多主站并发/连接复用场景下发生会话串扰,响应被错误投递\",\n    \"suggested_action\": \"客户端丢弃该不匹配响应并按事务ID重发请求;排查 gw-01 是否被多个主站同时访问,禁用不当的连接复用,确保请求-响应严格按事务ID配对\"\n  },\n  {\n    \"symptom\": \"发送帧 01030000000184f5 为无 MBAP 头的 RTU 帧,且 CRC 校验错误(正确应为 840A)\",\n    \"root_cause\": \"客户端协议模式配置错误,将 Modbus RTU 帧直接写入 TCP 通道,同时 CRC 计算错误或链路存在误码,从站/网关将丢弃该帧导致超时\",\n    \"suggested_action\": \"统一客户端与 gw-01 的协议模式(Modbus TCP 或 RTU over TCP);修正 CRC 生成逻辑;检查串行链路波特率、线缆质量与接地抗干扰情况\"\n  }\n]",
+   "problems": [
+    "symptom keywords miss: 'TCP 连接被拒绝(conn refused at gw-01),无法建立 Modbus/TCP 会话'"
+   ]
+  }
+ }
+}

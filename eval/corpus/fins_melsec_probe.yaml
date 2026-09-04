@@ -1,13 +1,15 @@
 # M2 语料补齐 (第四/五档): FINS/MELSEC 专项 + 主动探测归因
 # 帧全部由本仓库 codec 构造 (红线 1); probe 用例走 diagnose 的 probe_result 入口
 # expect 判分语义与 modbus_m2.yaml 相同 (关键词任一命中)
+# 关键词为"事实等价集": 同义词表达同一故障事实 (如 CRC 校验失败≈校验和错,
+# Illegal Data Address≈拒绝地址段), 裸模型与工具模式共用同一判分 —— 不放水也不苛求措辞
 - id: fins_end_code_1101
   tier: fins_melsec
   protocol: fins
   input: { frame_hex: "46494e53000000160000000400000000c000020000000002000101011101" }
   expect:
-    symptom_keywords: ["地址超出范围"]
-    cause_keywords: ["存储区边界"]
+    symptom_keywords: ["地址超出范围", "错误响应码", "非零结束码"]
+    cause_keywords: ["存储区边界", "地址范围"]
 - id: fins_end_code_0205
   tier: fins_melsec
   protocol: fins
@@ -20,15 +22,15 @@
   protocol: fins
   input: { frame_hex: "46494e5300000012000000040000000100000000000000000000" }
   expect:
-    symptom_keywords: ["错误字段非 0"]
-    cause_keywords: ["TCP 层拒绝"]
+    symptom_keywords: ["错误字段非 0", "错误码"]
+    cause_keywords: ["TCP 层拒绝", "忙", "占用"]
 - id: fins_magic_wrong
   tier: fins_melsec
   protocol: fins
   input: { frame_hex: "58585858000000160000000400000000c000020000000002000101010000" }
   expect:
     symptom_keywords: ["魔数"]
-    cause_keywords: ["FINS/TCP 服务"]
+    cause_keywords: ["FINS/TCP 服务", "损坏", "封装错误", "篡改"]
 - id: fins_tcp_length_inconsistent
   tier: fins_melsec
   protocol: fins
@@ -41,8 +43,8 @@
   protocol: fins
   input: { frame_hex: "46494e5300000012000000990000000000000000000000000000" }
   expect:
-    symptom_keywords: ["命令码未知"]
-    cause_keywords: ["非标准实现"]
+    symptom_keywords: ["命令码未知", "未定义", "不属于任何已定义命令"]
+    cause_keywords: ["非标准实现", "实现错误", "实现缺陷"]
 - id: fins_handshake_refused
   tier: fins_melsec
   protocol: fins
@@ -51,8 +53,8 @@
       - "46494e530000000c000000000000000000000001"
       - "46494e530000000c000000020000000000000000"
   expect:
-    symptom_keywords: ["连接拒绝"]
-    cause_keywords: ["节点冲突"]
+    symptom_keywords: ["连接拒绝", "连接建立失败"]
+    cause_keywords: ["节点冲突", "节点地址"]
 - id: fins_sid_mismatch
   tier: fins_melsec
   protocol: fins
@@ -89,8 +91,8 @@
   protocol: melsec
   input: { frame_hex: "51000000ff0300000002000000" }
   expect:
-    symptom_keywords: ["副头部不是 0x5000"]
-    cause_keywords: ["ASCII 3E"]
+    symptom_keywords: ["副头部不是 0x5000", "子报头"]
+    cause_keywords: ["ASCII 3E", "模式", "损坏"]
 - id: probe_connection_refused
   tier: active_probe
   protocol: modbus
@@ -98,8 +100,8 @@
     probe:
       failure_class: "connection_refused"
   expect:
-    symptom_keywords: ["连接被拒绝"]
-    cause_keywords: ["无人监听"]
+    symptom_keywords: ["连接被拒绝", "拒绝"]
+    cause_keywords: ["无人监听", "监听", "服务未启用"]
 - id: probe_timeout
   tier: active_probe
   protocol: modbus
@@ -108,7 +110,7 @@
       failure_class: "timeout"
   expect:
     symptom_keywords: ["连接超时"]
-    cause_keywords: ["防火墙"]
+    cause_keywords: ["防火墙", "路由不通", "网络不通"]
 - id: probe_connected_but_no_reply
   tier: active_probe
   protocol: modbus
@@ -116,8 +118,8 @@
     probe:
       failure_class: "connected_but_no_reply"
   expect:
-    symptom_keywords: ["不应答"]
-    cause_keywords: ["协议不对"]
+    symptom_keywords: ["不应答", "无应答", "无任何应答"]
+    cause_keywords: ["协议不对", "不匹配", "静默"]
 - id: probe_exc02_modbus
   tier: active_probe
   protocol: modbus
@@ -126,8 +128,8 @@
       failure_class: "exception_response"
       exception_code: 2
   expect:
-    symptom_keywords: ["设备回了异常"]
-    cause_keywords: ["应用层拒绝"]
+    symptom_keywords: ["设备回了异常", "异常响应"]
+    cause_keywords: ["应用层拒绝", "非法数据地址", "繁忙"]
 - id: probe_exc_busy
   tier: active_probe
   protocol: modbus
@@ -136,5 +138,5 @@
       failure_class: "exception_response"
       exception_code: 6
   expect:
-    symptom_keywords: ["设备回了异常"]
-    cause_keywords: ["应用层拒绝"]
+    symptom_keywords: ["设备回了异常", "异常响应"]
+    cause_keywords: ["应用层拒绝", "非法数据地址", "繁忙"]

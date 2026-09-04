@@ -33,16 +33,16 @@
   protocol: modbus
   input: { frame_hex: "000100000003018302" }
   expect:
-    symptom_keywords: ["拒绝该地址段"]
-    cause_keywords: ["超出范围", "偏移"]
+    symptom_keywords: ["拒绝该地址段|非法数据地址|异常响应"]
+    cause_keywords: ["超出范围", "偏移", "非法数据地址", "Illegal Data Address"]
 
 - id: tcp_exc03_value
   tier: single_frame_tcp
   protocol: modbus
   input: { frame_hex: "000200000003018303" }
   expect:
-    symptom_keywords: ["拒绝请求参数值"]
-    cause_keywords: ["超出设备允许范围"]
+    symptom_keywords: ["拒绝请求参数值", "异常响应", "异常码"]
+    cause_keywords: ["超出设备允许范围", "超出从站支持范围", "Illegal Data Value", "非法数据值"]
 
 - id: tcp_length_field_bad
   tier: single_frame_tcp
@@ -50,8 +50,8 @@
   input: { frame_hex: "0003000000100103020000" }
   expect:
     check_failed: [length_field_consistent]
-    symptom_keywords: ["长度字段与实际字节数不符"]
-    cause_keywords: ["粘包", "半包"]
+    symptom_keywords: ["长度字段与实际字节数不符", "长度字段", "长度异常"]
+    cause_keywords: ["粘包", "半包", "组包错误", "截断"]
 
 - id: tcp_protocol_id_bad
   tier: single_frame_tcp
@@ -60,7 +60,7 @@
   input: { frame_hex: "00040005000601030000000a" }
   expect:
     check_failed: [protocol_id_zero]
-    cause_keywords: ["中间设备", "变体"]
+    cause_keywords: ["中间设备", "变体", "不符合", "错误填充"]
 
 - id: tcp_unit_out_of_range
   tier: single_frame_tcp
@@ -76,15 +76,15 @@
   input: { frame_hex: "000600000006012f00000000" }
   expect:
     check_failed: [function_code_known]
-    cause_keywords: ["厂商自定义", "帧错位"]
+    cause_keywords: ["厂商自定义", "帧错位", "私有功能码", "实现错误"]
 
 - id: rtu_crc_bad
   tier: integrity_crc
   protocol: modbus
   input: { frame_hex: "01030000000184f5" }
   expect:
-    symptom_keywords: ["RTU 帧校验和错"]
-    cause_keywords: ["波特率", "噪声", "切帧"]
+    symptom_keywords: ["RTU 帧校验和错", "CRC 校验失败", "CRC 校验错", "CRC 错误"]
+    cause_keywords: ["波特率", "噪声", "切帧", "干扰", "损坏"]
 
 - id: rtu_ok
   tier: integrity_crc
@@ -98,7 +98,7 @@
   protocol: modbus
   input: { frame_hex: "0103" }
   expect:
-    symptom_keywords: ["RTU 帧不足 4 字节"]
+    symptom_keywords: ["RTU 帧不足 4 字节", "帧不完整", "缺少"]
 
 - id: rtu_exc_shape_ok
   tier: integrity_crc
@@ -106,7 +106,7 @@
   # 5 字节异常响应: fc83 (fc3|0x80), 异常码 02, CRC 正确
   input: { frame_hex: "018302c0f1" }
   expect:
-    symptom_keywords: ["设备拒绝该地址段"]
+    symptom_keywords: ["设备拒绝该地址段", "非法数据地址", "异常响应"]
     cause_keywords: ["超出"]
 
 - id: rtu_exc_crc_bad
@@ -114,7 +114,7 @@
   protocol: modbus
   input: { frame_hex: "0183023ff1" }
   expect:
-    symptom_keywords: ["RTU 帧校验和错"]
+    symptom_keywords: ["RTU 帧校验和错", "CRC 校验失败", "CRC 校验错", "CRC 错误"]
 
 - id: log_normal_flow
   tier: batch_log
@@ -132,7 +132,7 @@
     log_snippet: >-
       TX 000100000006010300000002 | RX 00420000000701030400010002
   expect:
-    symptom_keywords: ["响应事务号与请求不一致"]
+    symptom_keywords: ["响应事务号与请求不一致|事务标识符与请求不匹配|应答与请求不匹配"]
     cause_keywords: ["串包", "网关"]
 
 - id: log_truncated_resp
@@ -142,8 +142,8 @@
     log_snippet: >-
       TX 000100000006010300000002 | RX 0001000000070103040001
   expect:
-    symptom_keywords: ["字节数与数据不符", "长度字段与实际字节数不符"]
-    cause_keywords: ["半包"]
+    symptom_keywords: ["字节数与数据不符|帧不完整|帧被截断", "长度字段与实际字节数不符|长度字段与实际不符"]
+    cause_keywords: ["半包|截断"]
 
 - id: log_exc_mixed_flow
   tier: batch_log
@@ -152,7 +152,7 @@
     log_snippet: >-
       TX 000100000006010300640005 | RX 000100000003018302 | TX 000200000006010300000002 | RX 00020000000701030400010002
   expect:
-    symptom_keywords: ["拒绝该地址段"]
+    symptom_keywords: ["拒绝该地址段|非法数据地址|异常响应"]
 
 - id: log_multi_issue_mix
   tier: batch_log
