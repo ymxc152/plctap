@@ -1,0 +1,23 @@
+name: Publish to PyPI
+
+# 打 v* 标签即触发: git tag v0.1.0 && git push origin v0.1.0
+# 用 PyPI Trusted Publishing (OIDC), GitHub Actions 内不需要任何 token/密码;
+# 前置一次性设置: PyPI 项目设置里启用 trusted publishing (见 docs/PUBLISH.md)
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  id-token: write  # OIDC 签发发布凭证
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -3,13 +3,38 @@ name = "plctap"
 version = "0.1.0"
 description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC PLCs"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.11"
+keywords = [
+    "mcp",
+    "modbus",
+    "fins",
+    "melsec",
+    "plc",
+    "industrial",
+    "scada",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Topic :: System :: Networking :: Monitoring",
+]
 dependencies = [
     "fastmcp>=2.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ymxc152/plctap"
+Repository = "https://github.com/ymxc152/plctap"
+Issues = "https://github.com/ymxc152/plctap/issues"
 
 [project.scripts]
 plctap = "plctap.server:main"
@@ -30,6 +55,15 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/plctap"]
+
+# sdist 排除本机敏感配置 (.claude/ 含本地路径与权限模型, 不得进 PyPI)
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".claude/**",
+    ".venv/**",
+    ".pytest_cache/**",
+    "**/__pycache__/**",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

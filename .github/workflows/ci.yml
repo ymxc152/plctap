@@ -12,5 +12,5 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
-      - run: uv sync
+      - run: uv sync --extra eval
       - run: uv run pytest -q
