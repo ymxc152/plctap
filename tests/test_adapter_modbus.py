@@ -72,7 +72,7 @@ class FakeSlave:
                     writer.write(head[:4] + struct.pack(">H", 100) + head[6:7] + bytes([fc, 0]))
                     await writer.drain()
                     continue
-                if fc in (5, 6):
+                if fc in (5, 6, 16):
                     # 写请求: 响应为请求 PDU 的逐字节回显 (规范 6.5/6.6 节)
                     writer.write(head[:4] + struct.pack(">H", len(rest) + 1) + head[6:7] + rest)
                     await writer.drain()
@@ -293,7 +293,7 @@ async def test_write_register_roundtrip(slave_factory):
     adapter, _ = make_adapter()
     out = await adapter.write(make_target(s.port), address=42, values=[0xABCD])
     assert out["request_frame"] == out["response_frame"]
-    assert out["request_frame"].endswith("06" + "002a" + "abcd")
+    assert out["request_frame"].endswith("10" + "002a" + "0001" + "02" + "abcd")
 
 
 async def test_write_coil_wire_value(slave_factory):
@@ -310,7 +310,7 @@ async def test_write_on_frame_called_before_send(slave_factory):
     adapter, _ = make_adapter()
     seen: list[str] = []
     await adapter.write(make_target(s.port), address=1, values=[5], on_frame=seen.append)
-    assert len(seen) == 1 and len(seen[0]) == 24  # 12 字节帧 = 24 hex 字符
+    assert len(seen) == 1 and len(seen[0]) == 30  # 15 字节 fc16 帧 = 30 hex 字符
 
 
 async def test_write_exception_raises(slave_factory):

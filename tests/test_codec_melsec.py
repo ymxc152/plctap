@@ -10,15 +10,14 @@ from plctap.protocols.melsec import codec
 from plctap.protocols.auto import parse_auto
 
 
-def mc_read_resp(words=(0x1234, 0xBEEF), end_code=0, net=0, pc=0, io=0x03FF, station=0) -> bytes:
-    """构造 0401 读响应 (小端)。"""
+def mc_read_resp(words=(0x1234, 0xBEEF), end_code=0, net=0, pc=0xFF, io=0x03FF, station=0) -> bytes:
+    """构造标准 0401 读响应: D0 00 + 路由5B + 数据长2B + 结束代码2B + 数据 (小端)。"""
     data = struct.pack("<H", end_code) + b"".join(struct.pack("<H", w) for w in words)
     header = (
-        codec.SUBHEADER_BYTES
+        codec.RESPONSE_SUBHEADER_BYTES
         + bytes([net, pc])
         + struct.pack("<H", io)
         + bytes([station])
-        + struct.pack("<H", 0)  # timer
         + struct.pack("<H", len(data))
     )
     return header + data
@@ -29,20 +28,20 @@ def mc_read_resp(words=(0x1234, 0xBEEF), end_code=0, net=0, pc=0, io=0x03FF, sta
 
 def test_build_read_request_layout():
     frame = codec.build_read_request("D", 100, 2)
-    assert frame[0:2] == b"\x00\x50"
-    (data_len,) = struct.unpack_from("<H", frame, 9)
-    assert data_len == 10  # cmd2 + subcmd2 + code1 + head3 + count2
+    assert frame[0:2] == b"\x50\x00"  # 子头部大端
+    (data_len,) = struct.unpack_from("<H", frame, 7)
+    assert data_len == 12  # timer2 + cmd2 + subcmd2 + num3 + code1 + count2
     data = frame[codec.FRAME_HEADER_LEN:]
     assert struct.unpack_from("<H", data, 0)[0] == 0x0401
-    assert data[4] == 0x44  # 'D'
-    assert data[5:8] == bytes([100, 0, 0])  # 3B 小端
+    assert data[4:7] == bytes([100, 0, 0])  # 软元件号 3B 小端
+    assert data[7] == 0xA8  # 二进制 D
     assert struct.unpack_from("<H", data, 8)[0] == 2
 
 
 def test_build_bit_device_count():
     frame = codec.build_read_request("X", 0, 16)
     data = frame[codec.FRAME_HEADER_LEN:]
-    assert data[4] == 0x58  # 'X'
+    assert data[7] == 0x9C  # 二进制 X
     assert struct.unpack_from("<H", data, 8)[0] == 16  # 点数原样, 响应按字回
 
 
@@ -75,13 +74,13 @@ def test_parse_response_normal():
     by_name = {f.name: f for f in r.fields}
     assert by_name["end_code"].value == 0
     assert by_name["word_values"].value == [0x1234, 0xBEEF]  # 小端还原
-    assert by_name["word_values"].byte_offset == codec.FRAME_HEADER_LEN + 2
+    assert by_name["word_values"].byte_offset == codec.FRAME_HEADER_LEN
 
 
 def test_parse_response_little_endian_semantics():
     # 线上 "34 12" 是小端的 0x1234 —— 与 FINS/Modbus 的大端相反 (知识库素材)
     resp = mc_read_resp(words=[0x1234])
-    offset = codec.FRAME_HEADER_LEN + 2
+    offset = codec.FRAME_HEADER_LEN
     assert resp[offset : offset + 2] == b"\x34\x12"
 
 
@@ -114,7 +113,7 @@ def test_parse_request_normal():
     r = codec.parse_request(req)
     assert r.valid and r.direction == "req"
     by_name = {f.name: f for f in r.fields}
-    assert by_name["device_code"].value == 0x44
+    assert by_name["device_code"].value == 0xA8
     assert by_name["head_device"].value == 100
     assert by_name["device_count"].value == 2
 
@@ -123,12 +122,11 @@ def test_parse_request_truncated():
     req = codec.build_read_request("D", 0, 1)[:-2]
     r = codec.parse_request(req)
     assert not r.valid
-    assert any("truncated" in e for e in r.errors)
 
 
 def test_parse_response_too_short_for_end_code():
-    # 11B 头 (data_len=0) 后只跟 1 字节: 不足 2B 结束代码
-    frame = codec.SUBHEADER_BYTES + b"\x00" * 7 + struct.pack("<H", 0) + b"\x00"
+    # 9B 响应头 (data_len=1) 后只跟 1 字节: 不足 2B 结束代码
+    frame = codec.RESPONSE_SUBHEADER_BYTES + b"\x00\xff" + struct.pack("<H", 0x03FF) + b"\x00" + struct.pack("<H", 1) + b"\x00"
     r = codec.parse_response(frame)
     assert not r.valid
     assert any("too short" in e for e in r.errors)

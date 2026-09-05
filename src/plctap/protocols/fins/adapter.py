@@ -26,6 +26,7 @@ from plctap.models import (
 )
 from plctap.protocols.base import ProtocolAdapter, ProtocolError, recv_exact, register_adapter
 from plctap.protocols.fins import codec
+from plctap.protocols.fins import meta as _meta
 
 FINS_CLIENT_NODE = 1
 
@@ -33,6 +34,7 @@ FINS_CLIENT_NODE = 1
 @register_adapter
 class FinsAdapter(ProtocolAdapter):
     name = "fins"
+    meta = _meta.META
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

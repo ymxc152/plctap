@@ -3,7 +3,7 @@
 <!-- mcp-name: io.github.ymxc152/plctap -->
 
 > Agent 的 PLC 驱动层 — 让 Claude / Codex / Cursor 直接连接、读写、诊断
-> Modbus TCP / FINS / MELSEC PLC 的 MCP Server。
+> Modbus TCP / FINS / MELSEC / Siemens S7comm PLC 的 MCP Server。
 
 ![demo](docs/demo.gif)
 

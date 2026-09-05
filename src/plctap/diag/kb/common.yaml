@@ -1,0 +1,57 @@
+entries:
+- id: probe_connection_refused
+  protocol: any
+  match:
+    failure_class:
+    - connection_refused
+  candidate:
+    symptom: TCP 连接被拒绝
+    root_cause: 目标端口无人监听 (端口/协议配错), 或网络路径不通 (路由/ACL)
+    suggested_action: 核对端口与服务类型 (Modbus 502 / FINS 9600 / MC 传书号自定); ping 与 telnet
+      验证路径
+    confidence: 0.95
+- id: probe_timeout
+  protocol: any
+  match:
+    failure_class:
+    - timeout
+  candidate:
+    symptom: 连接超时
+    root_cause: 防火墙丢包 (静默丢弃而非拒绝)、路由不通, 或设备离线
+    suggested_action: ping 目标; 查中间防火墙策略; 确认设备在线
+    confidence: 0.9
+- id: probe_no_reply
+  protocol: any
+  match:
+    failure_class:
+    - connected_but_no_reply
+  candidate:
+    symptom: TCP 建立成功但协议层不应答
+    root_cause: 端口对但协议不对 (同端口多服务), 或设备对该会话静默 (已连接数满/仅允许白名单)
+    suggested_action: 核对该端口注册的服务; 查设备的连接数/白名单限制
+    confidence: 0.9
+- id: probe_exception_response
+  protocol: any
+  match:
+    failure_class:
+    - exception_response
+  candidate:
+    symptom: 连接与协议正常, 设备回了异常/错误码
+    root_cause: 应用层拒绝 (地址/权限/参数), 详见 exception_code 对应条目
+    suggested_action: 按 exception_code 在本报告其余候选中定位具体原因
+    confidence: 0.7
+references:
+- protocol: modbus
+  note: 'Modbus 寄存器线上为大端; float32 由两个 16 位寄存器拼成, 常见两种组合: ABCD (高字在前, big) 与 DCBA (低字在前,
+    little)。读到的浮点值明显异常 (量级跳变/NaN) 时先换 byteorder 交叉验证, 再怀疑设备。
+
+    '
+- protocol: fins
+  note: 'FINS 全大端。float32 组合: big=高字在前 (原生日系组态常见)。 读到的浮点值明显异常时先换 byteorder 交叉验证。
+
+    '
+- protocol: melsec
+  note: 'MC/3E 线上为小端 (与 Modbus/FINS 相反)。float32 组合: little=低字在前 (MC 原生), big=高字在前
+    (组态软件导出常见)。读到的浮点值明显异常时先 换 byteorder 交叉验证。
+
+    '

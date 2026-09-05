@@ -2,14 +2,14 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ymxc152/plctap",
   "title": "plctap",
-  "description": "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC PLCs. Includes probe/read/write tools with a write gate, frame-level diagnosis engine, and a honeypot listener for client-side fault capture.",
+  "description": "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 PLCs.",
   "repository": { "url": "https://github.com/ymxc152/plctap", "source": "github" },
-  "version": "0.1.1",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "plctap",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "transport": { "type": "stdio" }
     }
   ]

@@ -1,0 +1,239 @@
+entries:
+- id: fins_magic_wrong
+  protocol: fins
+  match:
+    check_failed:
+    - magic_fins
+  candidate:
+    symptom: 帧头不是 "FINS" 魔数
+    root_cause: 端口上不是 FINS/TCP 服务 (可能是 PLC 的 HTTP/其它端口), 或流错位
+    suggested_action: 核对 PLC 以太网端口的服务配置 (FINS/TCP 默认 9600); 重新对齐帧边界
+    confidence: 0.95
+- id: fins_tcp_length_inconsistent
+  protocol: fins
+  match:
+    check_failed:
+    - tcp_length_consistent
+  candidate:
+    symptom: TCP 头长度字段与实际不符
+    root_cause: 粘包/半包或流错位
+    suggested_action: 按头部长度字段定长收帧; 抓包核对帧边界
+    confidence: 0.9
+- id: fins_tcp_command_unknown
+  protocol: fins
+  match:
+    check_failed:
+    - tcp_command_known
+  candidate:
+    symptom: TCP 命令码未知
+    root_cause: 流错位或非标准实现
+    suggested_action: 从 "FINS" 魔数重新对齐; 核对协议版本
+    confidence: 0.85
+- id: fins_tcp_error_nonzero
+  protocol: fins
+  match:
+    check_failed:
+    - tcp_error_zero
+  candidate:
+    symptom: TCP 层错误字段非 0
+    root_cause: PLC 在 TCP 层拒绝了该帧 (握手/状态机错误)
+    suggested_action: 重建连接后重新做节点握手; 核对命令序列
+    confidence: 0.9
+- id: fins_handshake_refused
+  protocol: fins
+  match:
+    field:
+      tcp_command:
+      - 2
+    direction: resp
+  candidate:
+    symptom: PLC 回节点连接拒绝 (TCP cmd 0x02)
+    root_cause: 客户端节点号与网络中已有节点冲突, 或 PLC 连接数已满
+    suggested_action: 换客户端节点号; 查 PLC 的 FINS/TCP 连接数配置与已有客户端
+    confidence: 0.9
+- id: fins_end_code_unknown
+  protocol: fins
+  match:
+    check_failed:
+    - end_code_known
+  candidate:
+    symptom: 结束代码不在已知表
+    root_cause: 厂商扩展码或帧错位
+    suggested_action: 查 PLC 手册结束代码表; 用 parse_frame 核对帧边界
+    confidence: 0.8
+- id: fins_sid_mismatch
+  protocol: fins
+  match:
+    parse_error_contains:
+    - sid mismatch
+  candidate:
+    symptom: 响应 SID 与请求不一致
+    root_cause: 并发调用串包或网关错误转发
+    suggested_action: 同一连接串行收发; 核对网关转发
+    confidence: 0.9
+- id: fins_node_mismatch
+  protocol: fins
+  match:
+    parse_error_contains:
+    - node mismatch
+  candidate:
+    symptom: 响应来源节点与请求目标不一致
+    root_cause: 路由配置错 (DA1 指向的节点不是实际应答者) 或中间网关代答
+    suggested_action: 核对 FINS 路由表与目标节点号; 确认链路上有无网关
+    confidence: 0.9
+- id: fins_0101_service_cancelled
+  protocol: fins
+  match:
+    end_code:
+    - 257
+  candidate:
+    symptom: 服务被取消
+    root_cause: 请求处理中途被设备侧取消 (超时/指令打断)
+    suggested_action: 重发请求; 检查设备侧是否有超时/中断配置
+    confidence: 0.85
+- id: fins_0201_local_node_error
+  protocol: fins
+  match:
+    end_code:
+    - 513
+  candidate:
+    symptom: 本地节点错误
+    root_cause: 发起方 (客户端侧) 的通信单元异常
+    suggested_action: 检查客户端所在网络单元状态后重试
+    confidence: 0.85
+- id: fins_0202_remote_node_error
+  protocol: fins
+  match:
+    end_code:
+    - 514
+  candidate:
+    symptom: 远端节点错误
+    root_cause: 目标 PLC 通信单元异常
+    suggested_action: 检查目标 PLC 通信单元状态 (错误灯/诊断区)
+    confidence: 0.85
+- id: fins_0203_controller_error
+  protocol: fins
+  match:
+    end_code:
+    - 515
+  candidate:
+    symptom: 通信控制器错误
+    root_cause: 链路上某通信控制器故障
+    suggested_action: 分段探测链路各节点定位故障段
+    confidence: 0.85
+    next_tools:
+    - probe_device
+- id: fins_0204_not_able_to_execute
+  protocol: fins
+  match:
+    end_code:
+    - 516
+  candidate:
+    symptom: 无法执行 (通信单元未上电/未就绪)
+    root_cause: 目标单元未初始化完成或处于停止状态
+    suggested_action: 确认目标单元运行状态后重试
+    confidence: 0.85
+- id: fins_0205_service_rejected
+  protocol: fins
+  match:
+    end_code:
+    - 517
+  candidate:
+    symptom: 服务被拒绝
+    root_cause: 设备处于拒绝服务的状态 (本地模式/保护中)
+    suggested_action: 确认 PLC 运行模式与保护设置
+    confidence: 0.85
+- id: fins_0206_no_response_from_remote
+  protocol: fins
+  match:
+    end_code:
+    - 518
+  candidate:
+    symptom: 远端节点无响应
+    root_cause: 目标节点离线/路由不可达 (FINS 经由多层网络时路由表未配)
+    suggested_action: 核对 FINS 路由表; 逐跳探测目标节点
+    confidence: 0.9
+    next_tools:
+    - probe_device
+- id: fins_0208_communications_error
+  protocol: fins
+  match:
+    end_code:
+    - 520
+  candidate:
+    symptom: 通信错误
+    root_cause: 传输中数据损坏 (噪声/拥塞)
+    suggested_action: 重试; 持续出现则查网络质量与负载
+    confidence: 0.85
+- id: fins_0304_destination_node_error
+  protocol: fins
+  match:
+    end_code:
+    - 772
+  candidate:
+    symptom: 目标节点不存在/不可达
+    root_cause: DA1 节点号在网络中无对应设备, 或路由表缺失
+    suggested_action: 核对目标节点号与 FINS 路由表
+    confidence: 0.9
+- id: fins_0401_service_undefined
+  protocol: fins
+  match:
+    end_code:
+    - 1025
+  candidate:
+    symptom: 命令未定义
+    root_cause: 目标设备不支持该 FINS 命令 (如老型号不支持 0101 扩展变体)
+    suggested_action: 查设备手册支持的 FINS 命令表
+    confidence: 0.85
+- id: fins_0402_service_disabled
+  protocol: fins
+  match:
+    end_code:
+    - 1026
+  candidate:
+    symptom: 命令被禁用
+    root_cause: 设备配置禁用了该命令 (如禁止 FINS 写/禁止上位机访问)
+    suggested_action: 核对 PLC 的 FINS 访问许可设置
+    confidence: 0.85
+- id: fins_0404_busy
+  protocol: fins
+  match:
+    end_code:
+    - 1028
+  candidate:
+    symptom: 设备忙
+    root_cause: 正在处理其它请求 (组态工具占用/扫描周期满)
+    suggested_action: 退避重试; 检查其它客户端占用
+    confidence: 0.85
+- id: fins_0405_access_denied
+  protocol: fins
+  match:
+    end_code:
+    - 1029
+  candidate:
+    symptom: 访问被拒绝
+    root_cause: 写保护/口令保护/访问许可未开放
+    suggested_action: 核对 PLC 保护设置与 FINS 访问许可
+    confidence: 0.9
+- id: fins_1101_address_range_error
+  protocol: fins
+  match:
+    end_code:
+    - 4353
+  candidate:
+    symptom: 地址超出范围
+    root_cause: 起始地址或数量超出该存储区边界 (如 DM 区上限)
+    suggested_action: 减小 count 从区首地址试探边界; 核对区域容量
+    confidence: 0.95
+    next_tools:
+    - plc_read
+- id: fins_1102_area_type_error
+  protocol: fins
+  match:
+    end_code:
+    - 4354
+  candidate:
+    symptom: 存储区类型不符
+    root_cause: 区域码与命令不匹配 (如对位操作区发字读变体), 或区域码写错
+    suggested_action: 核对区域码表 (CIO/W/H/A/DM/EM); 确认命令与区类型匹配
+    confidence: 0.9

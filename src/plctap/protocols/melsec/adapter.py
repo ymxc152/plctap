@@ -27,6 +27,7 @@ from plctap.protocols.base import (
     register_adapter,
 )
 from plctap.protocols.melsec import codec
+from plctap.protocols.melsec import meta as _meta
 
 FRAME_HEADER_LEN = codec.FRAME_HEADER_LEN
 
@@ -34,22 +35,29 @@ FRAME_HEADER_LEN = codec.FRAME_HEADER_LEN
 @register_adapter
 class MelsecAdapter(ProtocolAdapter):
     name = "melsec"
+    meta = _meta.META
 
     # ------------------------------------------------------------ 收帧
 
     async def _recv_frame(
-        self, reader: asyncio.StreamReader, timeout: float
+        self, reader: asyncio.StreamReader, timeout: float, frame_format: str = "3e_binary"
     ) -> bytes:
-        """按 3E 帧头的数据长度字段收一帧 (11B 头 + data_len 数据)。"""
-        head = await recv_exact(reader, FRAME_HEADER_LEN, timeout)
-        (subheader,) = struct.unpack_from("<H", head, 0)
-        if subheader != codec.SUBHEADER:
+        """按响应数据长度字段收一帧。支持全部 4 种 MELSEC 帧格式。
+
+        响应: 数据长字段在 dl_off (3E 7 / 4E 11), 之后为结束代码+数据,
+        总长 = dl_off + 2 + data_len。副头部应为 D0 00 (3E) / D4 00 (4E)。
+        """
+        dl_off = codec._DATALEN_OFFSETS[frame_format]
+        head = await recv_exact(reader, dl_off + 2, timeout)
+        (data_len,) = struct.unpack_from("<H", head, dl_off)
+        (sub,) = struct.unpack_from(">H", head, 0)
+        expected_sub = codec._RESP_SUBHEADERS[frame_format]
+        if sub != expected_sub:
             raise ProtocolError(
-                f"bad 3E subheader {subheader:#06x} (expected 0x5000), stream out of sync"
+                f"bad {frame_format} response subheader {sub:#06x} (expected {expected_sub:#06x}), stream out of sync"
             )
-        (data_len,) = struct.unpack_from("<H", head, 9)
         if not 2 <= data_len <= 0x2000:
-            raise ProtocolError(f"implausible 3E data_length {data_len}, aborting read")
+            raise ProtocolError(f"implausible {frame_format} data_length {data_len}, aborting read")
         payload = await recv_exact(reader, data_len, timeout)
         return head + payload
 
@@ -69,7 +77,7 @@ class MelsecAdapter(ProtocolAdapter):
         except OSError:
             return ProbeResult(reachable=False, failure_class="connection_refused", layer_hint="connectivity")
         try:
-            request = codec.build_read_request("D", 0, 1)
+            request = codec.build_read_request("D", 0, 2)  # 读 2 字: 部分从站实现 (如开源 plc-simulator) 对 1 字读有越界 bug
             writer.write(request)
             await asyncio.wait_for(writer.drain(), timeout)
             resp = await self._recv_frame(reader, timeout)
@@ -78,7 +86,7 @@ class MelsecAdapter(ProtocolAdapter):
             return ProbeResult(reachable=False, failure_class="connected_but_no_reply", layer_hint="protocol")
         finally:
             writer.close()
-        parsed = codec.parse_response(resp, request=request)
+        parsed = codec.parse_response_fmt(resp, request=request, frame_format="3e_binary")
         end_field = next((f for f in parsed.fields if f.name == "end_code"), None)
         if end_field is None or not parsed.valid:
             return ProbeResult(reachable=False, failure_class="connected_but_no_reply", layer_hint="protocol")
@@ -103,6 +111,7 @@ class MelsecAdapter(ProtocolAdapter):
         byteorder: ByteOrder = "big",
         timeout_ms: int | None = None,
         device: str = "D",
+        frame_format: str = "3e_binary",
     ) -> ReadResult:
         """读软元件 (0401 批量读, 字单位)。
 
@@ -113,14 +122,14 @@ class MelsecAdapter(ProtocolAdapter):
         默认 big 与 Modbus 工具语义对齐。
         """
         timeout = self.timeout(timeout_ms)
-        request = codec.build_read_request(device, address, count)
+        request = codec.build_read_request(device, address, count, frame_format=frame_format)
         started = time.perf_counter()
         resp = await locked_exchange(
             self.pool, self.key_for(target), request, self._recv_frame, timeout
         )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-        parsed = codec.parse_response(resp, request=request)
+        parsed = codec.parse_response_fmt(resp, request=request, frame_format=frame_format)
         end_field = next((f for f in parsed.fields if f.name == "end_code"), None)
         if end_field is None:
             raise McError("malformed response: no end code found; " + "; ".join(parsed.errors))

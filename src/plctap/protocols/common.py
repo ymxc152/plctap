@@ -8,7 +8,7 @@ MC (默认小端) 的 datatype 解释逻辑完全一致 —— 差异只在默�
 from __future__ import annotations
 
 import struct
-from typing import Sequence
+from typing import Any, Sequence
 
 from plctap.models import ByteOrder
 
@@ -51,3 +51,34 @@ def interpret_registers(
     raise ValueError(
         f"unknown datatype {datatype!r} (supported: uint16, int16, float32)"
     )
+
+
+def interpret_all(raw: list[int]) -> dict[str, Any]:
+    """把原始 16 位寄存器值按所有常见数据类型/字节序解释。
+
+    用于 datatype=None 时让 Agent 一次看到所有可能解读, 避免猜错
+    (D2 设计原则: "不猜, 把所有可能性摆出来")。
+
+    返回字典 key = 数据类型_字节序, value = 解释后的值列表。
+    """
+    result: dict[str, Any] = {}
+
+    # 16 位逐寄存器
+    result["uint16"] = list(raw)
+    result["int16"] = [v - 0x10000 if v >= 0x8000 else v for v in raw]
+
+    # 32 位组合 (仅偶数个寄存器时)
+    if len(raw) >= 2 and len(raw) % 2 == 0:
+        result["float32_big"] = interpret_registers(raw, "float32", "big")
+        result["float32_little"] = interpret_registers(raw, "float32", "little")
+
+        int32_big: list[int] = []
+        int32_little: list[int] = []
+        for i in range(0, len(raw), 2):
+            hi, lo = raw[i], raw[i + 1]
+            int32_big.append((hi << 16) | lo)
+            int32_little.append((lo << 16) | hi)
+        result["int32_big"] = int32_big
+        result["int32_little"] = int32_little
+
+    return result

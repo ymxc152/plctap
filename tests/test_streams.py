@@ -79,7 +79,7 @@ def test_melsec_single_frame():
 
 def test_melsec_partial():
     frame = mc_codec.build_read_request("D", 0, 2)
-    assert streams.try_frame_len("melsec", frame[:11]) is None
+    assert streams.try_frame_len("melsec", frame[:9]) is None
     assert streams.try_frame_len("melsec", frame) == len(frame)
 
 

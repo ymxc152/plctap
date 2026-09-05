@@ -68,28 +68,28 @@
 - id: melsec_end_code_c04f
   tier: fins_melsec
   protocol: melsec
-  input: { frame_hex: "00500000ff0300000002004fc0" }
+  input: { frame_hex: "d00000ffff030002004fc0" }
   expect:
     symptom_keywords: ["超出允许范围"]
     cause_keywords: ["参数化范围"]
 - id: melsec_end_code_c059
   tier: fins_melsec
   protocol: melsec
-  input: { frame_hex: "00500000ff03000000020059c0" }
+  input: { frame_hex: "d00000ffff0300020059c0" }
   expect:
     symptom_keywords: ["数据代码错误"]
     cause_keywords: ["ASCII"]
 - id: melsec_data_length_inconsistent
   tier: fins_melsec
   protocol: melsec
-  input: { frame_hex: "00500000ff03000000e7030000" }
+  input: { frame_hex: "d00000ffff0300e7030000" }
   expect:
     symptom_keywords: ["数据长度字段与实际不符"]
     cause_keywords: ["粘包"]
 - id: melsec_subheader_wrong
   tier: fins_melsec
   protocol: melsec
-  input: { frame_hex: "51000000ff0300000002000000" }
+  input: { frame_hex: "510000ffff030002000000" }
   expect:
     symptom_keywords: ["副头部不是 0x5000", "子报头"]
     cause_keywords: ["ASCII 3E", "模式", "损坏"]

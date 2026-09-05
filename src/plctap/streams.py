@@ -8,7 +8,8 @@ TCP 是流式协议: 单次 read 可能只收到半帧, 也可能一包含多帧
   (unit1+PDU) → 帧长 = 6 + length
 - fins: 头部 16B (magic4+length4 BE+command4+error4), length = 8 + payload
   → 帧长 = 8 + length
-- melsec: 头部 11B, data_length (LE, 偏移 9) = 数据字节数 → 帧长 = 11 + data_length
+- melsec: data_length (LE, 偏移 7) = 其后字节数 (定时器/结束码+数据)
+  → 帧长 = 9 + data_length
 """
 
 from __future__ import annotations
@@ -46,8 +47,8 @@ def try_frame_len(protocol: str, buf: bytes) -> int | None:
         (length,) = struct.unpack_from(">I", buf, 4)
         total = 8 + length
     else:  # melsec
-        (data_len,) = struct.unpack_from("<H", buf, 9)
-        total = 11 + data_len
+        (data_len,) = struct.unpack_from("<H", buf, 7)
+        total = 9 + data_len
     if total > MAX_FRAME_LEN[protocol] or total < hdr:
         return 0
     if len(buf) < total:

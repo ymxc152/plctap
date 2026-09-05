@@ -1,0 +1,95 @@
+entries:
+- id: melsec_subheader_wrong
+  protocol: melsec
+  match:
+    check_failed:
+    - subheader_3e_binary
+  candidate:
+    symptom: 副头部不是 0x5000
+    root_cause: 对端不是 3E 二进制帧 (ASCII 3E/4C/2C 模式), 或流错位
+    suggested_action: 核对 PLC 以太网模块的通信格式设置 (应为 3E 二进制); 重新对齐帧边界
+    confidence: 0.95
+- id: melsec_data_length_inconsistent
+  protocol: melsec
+  match:
+    check_failed:
+    - data_length_consistent
+  candidate:
+    symptom: 数据长度字段与实际不符
+    root_cause: 粘包/半包或流错位
+    suggested_action: 按头部长度字段定长收帧; 抓包核对帧边界
+    confidence: 0.9
+- id: melsec_command_unsupported
+  protocol: melsec
+  match:
+    check_failed:
+    - command_supported
+  candidate:
+    symptom: 命令码不在支持范围
+    root_cause: 非 0401 批量读 (其它命令/厂商扩展), 或帧错位
+    suggested_action: 查手册命令表; 确认帧边界
+    confidence: 0.85
+- id: melsec_end_code_unknown
+  protocol: melsec
+  match:
+    check_failed:
+    - end_code_known
+  candidate:
+    symptom: 结束代码不在已知表
+    root_cause: 扩展错误码或帧错位
+    suggested_action: 查 CPU 手册结束代码章节; 用 parse_frame 核对帧边界
+    confidence: 0.8
+- id: melsec_c04f_device_range
+  protocol: melsec
+  match:
+    end_code:
+    - 49231
+  candidate:
+    symptom: 软元件号超出允许范围
+    root_cause: 起始编号或点数超出该软元件的参数化范围 (范围由 PLC 参数决定, 非固定)
+    suggested_action: 减小 count 从 0 试探边界; 核对 PLC 参数里的软元件容量设定
+    confidence: 0.95
+    next_tools:
+    - plc_read
+- id: melsec_c059_data_code_error
+  protocol: melsec
+  match:
+    end_code:
+    - 49241
+  candidate:
+    symptom: 数据代码错误
+    root_cause: '二进制/ASCII 模式不匹配 (常见: 客户端发二进制帧, PLC 配成了 ASCII 3E)'
+    suggested_action: 核对 PLC 通信格式与客户端帧模式一致; 检查帧内容是否被 ASCII 化
+    confidence: 0.9
+- id: melsec_c0d8_access_forbidden
+  protocol: melsec
+  match:
+    end_code:
+    - 49368
+  candidate:
+    symptom: 访问被禁止
+    root_cause: 目标软元件被参数设置为禁止在线访问, 或 CPU 处于保护状态
+    suggested_action: 核对 PLC 参数的在线访问许可与保护设置
+    confidence: 0.9
+- id: melsec_header_echo_mismatch
+  protocol: melsec
+  match:
+    parse_error_contains:
+    - network_number mismatch
+    - pc_number mismatch
+    - module_io mismatch
+  candidate:
+    symptom: 响应头与请求的路由字段不一致
+    root_cause: 多跳网络 (网络号/PC 号非 0) 时中间模块路由不符, 或串包
+    suggested_action: 核对网络号/PC 号/模块 I/O 配置; 单连接串行收发排除串包
+    confidence: 0.85
+- id: melsec_data_short
+  protocol: melsec
+  match:
+    parse_error_contains:
+    - data short
+  candidate:
+    symptom: 响应数据量少于请求
+    root_cause: 半包或设备按异常边界截断返回
+    suggested_action: 按长度字段收全帧再核对; 减小 count 重试
+    confidence: 0.85

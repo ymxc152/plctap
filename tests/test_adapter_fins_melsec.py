@@ -136,8 +136,8 @@ class FakeMcServer:
                     continue  # 没数据, 继续等
                 except asyncio.IncompleteReadError:
                     return  # EOF: 对端已关, 继续循环会同步自旋饿死事件循环
-                (data_len,) = struct.unpack_from("<H", head, 9)
-                data = await asyncio.wait_for(reader.readexactly(data_len), 1.0)
+                (data_len,) = struct.unpack_from("<H", head, 7)
+                data = await asyncio.wait_for(reader.readexactly(data_len - 2), 1.0)  # 去掉定时器 2B
                 if self.mode == "silent":
                     await self._abort.wait()
                     continue
@@ -145,19 +145,18 @@ class FakeMcServer:
                     writer.write(b"\x50\x50" + head[2:] + data)
                     await writer.drain()
                     continue
-                head_dev = data[5:8]
+                head_dev = data[4:7]
                 (count,) = struct.unpack_from("<H", data, 8)
                 # 位软元件 (X/Y/B/M) 按字读: 响应字数 = ceil(count/16)
-                code = data[4]
-                words = (count + 15) // 16 if code in (0x58, 0x59, 0x42, 0x4D) else count
+                code = data[7]
+                words = (count + 15) // 16 if code in (0x9C, 0x9D, 0xA0, 0x90) else count
                 resp_data = struct.pack("<H", self.end_code)
                 if self.end_code == 0:
                     resp_data += b"".join(struct.pack("<H", 0x2000 + i) for i in range(words))
                 resp_head = (
-                    mc_codec.SUBHEADER_BYTES
+                    mc_codec.RESPONSE_SUBHEADER_BYTES
                     + head[2:7]  # 回显 网络/PC/I/O/站号
-                    + head[7:9]  # 回显 timer
-                    + struct.pack("<H", len(resp_data))
+                    + struct.pack("<H", len(resp_data))  # 响应数据长 = 结束码+数据
                 )
                 writer.write(resp_head + resp_data)
                 await writer.drain()
@@ -311,7 +310,7 @@ async def test_mc_read(mc_server):
         r = await adapter.read(target, address=0, count=3)
         assert r.raw_registers == [0x2000, 0x2001, 0x2002]
         # cmd0104 + subcmd0000 + 'D' + head 000000 + count 0300 (全小端)
-        assert r.request_frame.endswith("01040000440000000300")
+        assert r.request_frame.endswith("01040000000000a80300")
     finally:
         await pool.close_all()
 

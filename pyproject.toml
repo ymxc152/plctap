@@ -1,7 +1,7 @@
 [project]
 name = "plctap"
-version = "0.1.1"
-description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC PLCs"
+version = "0.2.0"
+description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 PLCs"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -10,6 +10,9 @@ keywords = [
     "modbus",
     "fins",
     "melsec",
+    "s7",
+    "s7comm",
+    "siemens",
     "plc",
     "industrial",
     "scada",

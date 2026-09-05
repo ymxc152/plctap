@@ -145,8 +145,8 @@ def test_fins_reference_note_on_values():
 def test_melsec_c04f():
     data = struct.pack("<H", 0xC04F)
     header = (
-        mc_codec.SUBHEADER_BYTES + bytes([0, 0]) + struct.pack("<H", 0x03FF)
-        + bytes([0]) + struct.pack("<H", 0) + struct.pack("<H", len(data))
+        mc_codec.RESPONSE_SUBHEADER_BYTES + bytes([0, 0xFF]) + struct.pack("<H", 0x03FF)
+        + bytes([0]) + struct.pack("<H", len(data))
     )
     r = diagnose("melsec", frames_hex=[(header + data).hex()])
     top = r.candidates[0]
@@ -156,7 +156,7 @@ def test_melsec_c04f():
 
 def test_melsec_subheader_wrong():
     data = struct.pack("<H", 0) + struct.pack("<H", 0x1234)
-    header = b"\x50\x50" + bytes([0, 0]) + struct.pack("<H", 0x03FF) + bytes([0]) + struct.pack("<H", 0) + struct.pack("<H", len(data))
+    header = b"\x50\x50" + bytes([0, 0xFF]) + struct.pack("<H", 0x03FF) + bytes([0]) + struct.pack("<H", len(data))
     r = diagnose("melsec", frames_hex=[(header + data).hex()])
     assert any(c.symptom.startswith("副头部不是") for c in r.candidates)
 

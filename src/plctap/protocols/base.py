@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Callable, ClassVar, TypeVar
 
 from plctap.conn.manager import ConnectionKey, ConnectionPool
@@ -23,6 +24,25 @@ from plctap.models import (
 T = TypeVar("T", bound="ProtocolAdapter")
 
 
+@dataclass(frozen=True)
+class ProtocolMeta:
+    """每个协议的自描述元数据, 由 adapter 注册时携带。
+
+    list_protocols 把这些信息原样返回给 Agent, 让 LLM 不用查文档
+    就能推断 "这个设备该用什么协议"。
+    """
+
+    name: str
+    default_port: int | None
+    port_hints: list[int]
+    addressing_model: str  # "register" | "memory_area" | "device" | "tag"
+    summary: str  # 一行人可读描述
+    data_types: list[str]  # 该协议 read 支持的解释类型
+    vendor_hints: list[str] = field(default_factory=list)  # 常见品牌线索
+    read_options: dict[str, str] = field(default_factory=dict)  # options 参数说明
+    write_options: dict[str, str] = field(default_factory=dict)  # 写参数说明
+
+
 class ProtocolAdapter(ABC):
     """工业协议层适配器: v1 只做 Client/主站 (ARCHITECTURE.md 第 9 节)。
 
@@ -31,6 +51,7 @@ class ProtocolAdapter(ABC):
     """
 
     name: ClassVar[str]
+    meta: ClassVar[ProtocolMeta | None] = None
 
     def __init__(self, pool: ConnectionPool, config: PlctapConfig) -> None:
         self.pool = pool

@@ -26,3 +26,7 @@ issue-evidence/
 # eval 生成物 (可再生)
 eval/prompts.jsonl
 eval/results_baseline.json
+
+# 验证工具链 (便携 JDK / 第三方模拟器源码, 体积大且可再生)
+tools/
+scripts/*.log

@@ -26,7 +26,7 @@ import yaml
 from plctap.models import Candidate, DiagnosticReport, ParseResult, ProbeResult
 from plctap.protocols.auto import parse_auto
 
-_KB_PATH = Path(__file__).with_name("kb.yaml")
+_KB_DIR = Path(__file__).with_name("kb")
 
 # 连续 hex 串 (偶长): >= 16 个 hex 字符 = 8 字节 (Modbus RTU 最短帧)
 _HEX_TOKEN = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{16,}(?![0-9a-fA-F])")
@@ -39,8 +39,14 @@ _RTU_GATE = frozenset({
 
 @lru_cache(maxsize=1)
 def _load_kb() -> dict[str, Any]:
-    with _KB_PATH.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    """扫描 kb/ 目录下所有 yaml 文件, 合并 entries + references。"""
+    merged: dict[str, Any] = {"entries": [], "references": []}
+    for f in sorted(_KB_DIR.glob("*.yaml")):
+        with f.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+        merged["entries"].extend(data.get("entries", []))
+        merged.setdefault("references", []).extend(data.get("references", []))
+    return merged
 
 
 def kb_entries() -> list[dict[str, Any]]:

@@ -111,7 +111,7 @@ async def test_unknown_protocol_rejected(tmp_path):
     app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
     async with Client(app) as client:
         with pytest.raises(Exception, match="unknown protocol"):
-            await client.call_tool("probe_device", {"protocol": "s7", "host": "1.2.3.4", "port": 102})
+            await client.call_tool("probe_device", {"protocol": "nonexistent", "host": "1.2.3.4", "port": 102})
 
 
 async def test_audit_log_written_on_write_call(tmp_path):
@@ -129,8 +129,8 @@ async def test_audit_log_written_on_write_call(tmp_path):
             )
     text = log.read_text(encoding="utf-8")
     assert log.exists() and "plc_write" in text
-    # fc06 请求帧: MBAP(7B) + 06 + addr=0000 + value=0001 -> 含 "010600000001"
-    assert "010600000001" in text
+    # fc06 请求帧: MBAP(7B) + 06 + addr=0000 + value=0001 -> 含 "1000000001020001"
+    assert "1000000001020001" in text
 
 
 def test_main_runs_stdio_without_banner(monkeypatch):
@@ -173,3 +173,46 @@ async def test_send_frame_roundtrip_and_audit(tmp_path):
         await registry.stop(port)
     text = log.read_text(encoding="utf-8")
     assert "send_frame" in text and REQ_FC3 in text
+
+# ---------------------------------------------------------------- S7 parse_frame (真实 PLC 帧)
+
+
+S7_READ_REQ = "0300001F02F080320100000001000E00000401120A10020004000184005250"
+S7_READ_RSP = "0300001D02F0803203000000010002001F00000401FF04000441970A3D"
+
+
+async def test_parse_frame_s7_request(tmp_path):
+    app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
+    async with Client(app) as client:
+        result = await client.call_tool(
+            "parse_frame", {"protocol": "s7", "frame_hex": S7_READ_REQ, "direction": "req"}
+        )
+    data = result.data
+    assert data.valid, data.errors
+    values = {f.name: f.value for f in data.fields}
+    assert values["function"] == 4
+    assert values["item0_byte_address"] == 2634
+    assert values["item0_address"] == "DB1.DBB2634"
+
+
+async def test_parse_frame_s7_response_real_header(tmp_path):
+    app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
+    async with Client(app) as client:
+        result = await client.call_tool(
+            "parse_frame", {"protocol": "s7", "frame_hex": S7_READ_RSP, "direction": "resp"}
+        )
+    data = result.data
+    assert data.valid, data.errors
+    values = {f.name: f.value for f in data.fields}
+    assert values["return_code"] == 0xFF
+    assert values["word_values"] == [0x4197, 0x0A3D]
+
+
+async def test_parse_frame_s7_auto_direction(tmp_path):
+    app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
+    async with Client(app) as client:
+        req = await client.call_tool("parse_frame", {"protocol": "s7", "frame_hex": S7_READ_REQ})
+        rsp = await client.call_tool("parse_frame", {"protocol": "s7", "frame_hex": S7_READ_RSP})
+    assert req.data.fields[0].name == "tpkt_version" and req.data.valid
+    assert rsp.data.valid
+    assert {f.name: f.value for f in rsp.data.fields}["rosctr"] == 3

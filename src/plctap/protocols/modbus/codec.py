@@ -22,10 +22,11 @@ READ_HOLDING_REGISTERS = 3
 READ_INPUT_REGISTERS = 4
 WRITE_SINGLE_COIL = 5
 WRITE_SINGLE_REGISTER = 6
+WRITE_MULTIPLE_REGISTERS = 16
 
 READ_FCS = (READ_COILS, READ_DISCRETE_INPUTS, READ_HOLDING_REGISTERS, READ_INPUT_REGISTERS)
 WRITE_FCS = (WRITE_SINGLE_COIL, WRITE_SINGLE_REGISTER)
-KNOWN_FCS = READ_FCS + WRITE_FCS
+KNOWN_FCS = READ_FCS + WRITE_FCS + (WRITE_MULTIPLE_REGISTERS,)
 
 EXCEPTION_FLAG = 0x80  # 异常响应功能码 = 请求 FC | 0x80
 
@@ -106,6 +107,26 @@ def build_write_single(
         wire_value = value
     pdu = struct.pack(">BHH", function_code, address, wire_value)
     return _mbap(transaction_id, unit, len(pdu)) + pdu
+
+
+
+def build_write_multiple(tid: int, unit: int, address: int, values: list[int]) -> bytes:
+    """fc16 写多个寄存器。values 为 16 位无符号整数列表。"""
+    if not values:
+        raise ValueError("values must not be empty")
+    if not 1 <= len(values) <= 123:
+        raise ValueError(f"fc16 supports 1-123 registers, got {len(values)}")
+    for v in values:
+        if not 0 <= v <= 0xFFFF:
+            raise ValueError(f"register value {v} out of range 0-65535")
+    byte_count = len(values) * 2
+    data = b"".join(struct.pack(">H", v) for v in values)
+    pdu = (
+        struct.pack(">BHHB", WRITE_MULTIPLE_REGISTERS, address, len(values), byte_count)
+        + data
+    )
+    mbap = struct.pack(">HHHB", tid, PROTOCOL_ID, 1 + len(pdu), unit)
+    return mbap + pdu
 
 
 def _mbap(transaction_id: int, unit: int, pdu_len: int) -> bytes:
@@ -502,11 +523,18 @@ def crc16(data: bytes) -> int:
 def parse_rtu(frame: bytes, direction: Literal["req", "resp"] = "auto") -> ParseResult:
     """解析 RTU 帧 (addr + fc + PDU + CRC2 小端)。畸形帧记 errors 不抛。
 
-    方向 auto 规则与 TCP 一致: 异常帧按响应; 8 字节帧按请求
-    (fc01-06 请求恒 8 字节; fc05/06 响应回显同形, 两种解释一致)。
+    方向 auto 规则: 异常帧按响应; 8 字节帧按请求 (fc01-06 请求恒 8 字节;
+    fc05/06 响应回显同形, 两种解释一致)。例外: fc16 请求最少 11 字节,
+    故 8 字节的 fc16 帧必为响应。
     """
     if direction == "auto":
-        direction = "req" if len(frame) == 8 else "resp"
+        _fc = frame[1] & 0x7F if len(frame) >= 2 else -1
+        if _fc == WRITE_MULTIPLE_REGISTERS:
+            # fc16: 请求含数据区 (>=11B), 响应恒 8B 回显
+            direction = "resp" if len(frame) == 8 else "req"
+        else:
+            # fc01-06: 请求恒 8B; fc05/06 响应回显同形, 两种解释一致
+            direction = "req" if len(frame) == 8 else "resp"
     errors: list[str] = []
     fields: list[FrameField] = []
     if len(frame) < 4:  # addr1 + fc1 + crc2
@@ -538,6 +566,27 @@ def parse_rtu(frame: bytes, direction: Literal["req", "resp"] = "auto") -> Parse
             fields.append(_field(frame, "exception_code", payload[0], 2, 1,
                                  EXCEPTION_CODES.get(payload[0], f"UNKNOWN_0x{payload[0]:02X}")))
         return ParseResult(protocol="modbus", direction="resp", fields=fields, valid=not errors, errors=errors)
+    if fc == WRITE_MULTIPLE_REGISTERS:
+        if direction == "req":
+            # 请求: start(2) + qty(2) + byte_count(1) + data...
+            if len(payload) >= 5:
+                start = struct.unpack_from(">H", payload, 0)[0]
+                qty = struct.unpack_from(">H", payload, 2)[0]
+                fields.append(_field(frame, "address", start, 2, 2))
+                fields.append(_field(frame, "quantity", qty, 4, 2))
+                fields.append(_field(frame, "byte_count", payload[4], 6, 1))
+            else:
+                errors.append("fc16 request too short")
+        else:
+            # 响应: 回显 start(2) + qty(2)
+            if len(payload) >= 4:
+                start = struct.unpack_from(">H", payload, 0)[0]
+                qty = struct.unpack_from(">H", payload, 2)[0]
+                fields.append(_field(frame, "address", start, 2, 2))
+                fields.append(_field(frame, "quantity", qty, 4, 2))
+            else:
+                errors.append("fc16 response too short")
+        return ParseResult(protocol="modbus", direction=direction, fields=fields, valid=not errors, errors=errors)
     if fc not in KNOWN_FCS:
         errors.append(f"unknown function code {fc:#04x}")
         return ParseResult(protocol="modbus", direction=direction, fields=fields, valid=not errors, errors=errors)

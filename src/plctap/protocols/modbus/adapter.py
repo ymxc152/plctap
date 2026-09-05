@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import struct
+from typing import Callable
 import time
 
 from plctap.conn.manager import ConnectionKey
@@ -31,6 +32,7 @@ from plctap.models import (
 from plctap.protocols import base
 from plctap.protocols.base import ProtocolAdapter, register_adapter
 from plctap.protocols.modbus import codec
+from plctap.protocols.modbus import meta as _meta
 
 _transaction_ids = itertools.count(1)
 
@@ -38,6 +40,7 @@ _transaction_ids = itertools.count(1)
 @register_adapter
 class ModbusAdapter(ProtocolAdapter):
     name = "modbus"
+    meta = _meta.META
 
     # ------------------------------------------------------------ 收帧
 
@@ -217,22 +220,32 @@ class ModbusAdapter(ProtocolAdapter):
         on_frame: Callable[[str], None] | None = None,
         point_type: str = "register",
         timeout_ms: int | None = None,
+        **kwargs,
     ) -> dict:
-        """fc05 写单线圈 / fc06 写单寄存器 (响应为请求的逐字节回显)。
+        """写寄存器/线圈。
+
+        point_type="register" 默认 fc16 (Write Multiple Registers);
+        kwargs._function_code=6 切换 fc06。
+        point_type="coil" 使用 fc05 (Write Single Coil)。
 
         on_frame 在帧构建后、任何网络动作前被调用 —— 审计先于发送,
         即使后续连接失败, 该次写意图与完整帧也已留痕 (D5/红线 2)。
         """
+        tid = next(_transaction_ids)
+        fc_override = kwargs.pop("_function_code", None)
         if point_type == "coil":
-            fc = codec.WRITE_SINGLE_COIL
+            if len(values) != 1:
+                raise ValueError("fc05 writes exactly one coil value")
+            request = codec.build_write_single(tid, target.unit, codec.WRITE_SINGLE_COIL, address, values[0])
         elif point_type == "register":
-            fc = codec.WRITE_SINGLE_REGISTER
+            if len(values) == 1 and fc_override == 6:
+                # 显式指定 fc06
+                request = codec.build_write_single(tid, target.unit, codec.WRITE_SINGLE_REGISTER, address, values[0])
+            else:
+                # 默认 fc16 (Write Multiple Registers) — 兼容绝大多数模拟器
+                request = codec.build_write_multiple(tid, target.unit, address, values)
         else:
             raise ValueError(f"point_type must be 'coil'|'register', got {point_type!r}")
-        if len(values) != 1:
-            raise ValueError("fc05/fc06 writes exactly one value; values length must be 1")
-        tid = next(_transaction_ids)
-        request = codec.build_write_single(tid, target.unit, fc, address, values[0])
         if on_frame is not None:
             on_frame(request.hex())
         timeout = self.timeout(timeout_ms)
@@ -245,7 +258,7 @@ class ModbusAdapter(ProtocolAdapter):
             exc = next((f.value for f in parsed.fields if f.name == "exception_code"), 0)
             raise ModbusError(
                 f"device returned exception {codec.exception_name(int(exc))} (0x{int(exc):02x})"
-                f" for fc{fc} address={address} value={values[0]}"
+                f" for address={address} values={values}"
             )
         if not parsed.valid:
             raise ModbusError("malformed write response: " + "; ".join(parsed.errors))

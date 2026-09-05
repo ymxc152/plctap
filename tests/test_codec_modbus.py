@@ -372,3 +372,38 @@ class TestInterpretRegisters:
 
     def test_none_returns_raw(self):
         assert codec.interpret_registers([1, 2], None) == [1, 2]
+
+
+# ---------------------------------------------------------------- RTU fc16 (回归: parse_rtu fc16 分支曾引用未定义变量)
+
+
+def _rtu_crc(data: bytes) -> int:
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc
+
+
+def test_parse_rtu_fc16_request():
+    body = bytes.fromhex("0110000000020441424344")
+    frame = body + struct.pack("<H", _rtu_crc(body))
+    r = codec.parse_rtu(frame)
+    assert r.valid, r.errors
+    by_name = {f.name: f.value for f in r.fields}
+    assert by_name["address"] == 0
+    assert by_name["quantity"] == 2
+    assert by_name["byte_count"] == 4
+
+
+def test_parse_rtu_fc16_response_auto_direction():
+    # fc16 响应恒 8 字节 (回显 start+qty); auto 必须判为响应而非请求
+    body = bytes.fromhex("011000000002")
+    frame = body + struct.pack("<H", _rtu_crc(body))
+    r = codec.parse_rtu(frame)
+    assert r.direction == "resp"
+    assert r.valid, r.errors
+    by_name = {f.name: f.value for f in r.fields}
+    assert by_name["address"] == 0
+    assert by_name["quantity"] == 2

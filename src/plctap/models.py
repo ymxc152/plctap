@@ -83,6 +83,7 @@ class ReadResult(BaseModel):
     request_frame: str
     raw_registers: list[int]
     interpreted: Any = None
+    interpretations: dict[str, Any] | None = None
     elapsed_ms: int
 
 
@@ -136,3 +137,5 @@ class PcapFlow(BaseModel):
 
     flow: str
     frames: list[PcapFrame] = []
+
+

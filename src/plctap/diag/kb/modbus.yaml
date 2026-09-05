@@ -1,0 +1,248 @@
+entries:
+- id: modbus_exc01_illegal_function
+  protocol: modbus
+  match:
+    exception_code:
+    - 1
+  candidate:
+    symptom: 设备拒绝该功能码
+    root_cause: 设备不支持此功能码 (fc 不在其实现范围内), 或 fc 与数据区类型不匹配 (如对只读输入区发 fc06)
+    suggested_action: 对照设备手册确认支持的 fc; 换用设备支持的读/写功能码重试
+    confidence: 0.95
+    next_tools:
+    - plc_read
+- id: modbus_exc02_illegal_data_address
+  protocol: modbus
+  match:
+    exception_code:
+    - 2
+  candidate:
+    symptom: 设备拒绝该地址段
+    root_cause: 起始地址或数量超出设备映射区范围, 或 0 基/1 基偏移约定搞反 (口语"40001"=0 基 address 0)
+    suggested_action: 把 count 减为 1 试探边界; 核对地址偏移约定后重算 address
+    confidence: 0.95
+    next_tools:
+    - plc_read
+- id: modbus_exc03_illegal_data_value
+  protocol: modbus
+  match:
+    exception_code:
+    - 3
+  candidate:
+    symptom: 设备拒绝请求参数值
+    root_cause: 数量或写值超出设备允许范围 (如单次读数量上限、fc05 非 0x0000/0xFF00)
+    suggested_action: 减小 count; 写线圈时确认 wire 值为 0x0000/0xFF00
+    confidence: 0.95
+- id: modbus_exc04_server_device_failure
+  protocol: modbus
+  match:
+    exception_code:
+    - 4
+  candidate:
+    symptom: 设备执行中出错
+    root_cause: 设备内部错误 (存储区访问失败/固件异常), 多为偶发
+    suggested_action: 重试一次; 持续复现则查设备诊断缓冲与固件日志
+    confidence: 0.9
+- id: modbus_exc05_acknowledge
+  protocol: modbus
+  match:
+    exception_code:
+    - 5
+  candidate:
+    symptom: 设备已受理但未完成
+    root_cause: 请求进入设备执行队列 (长操作), 响应将稍后到达
+    suggested_action: 等待后重新读取目标区确认结果
+    confidence: 0.85
+- id: modbus_exc06_server_device_busy
+  protocol: modbus
+  match:
+    exception_code:
+    - 6
+  candidate:
+    symptom: 设备忙, 拒绝处理
+    root_cause: 设备正在处理其它请求 (如组态工具长连接、长报文处理), 队列占满
+    suggested_action: 退避重试并拉长调用间隔; 检查是否有其它主站并发访问
+    confidence: 0.85
+- id: modbus_exc0a_gateway_path_unavailable
+  protocol: modbus
+  match:
+    exception_code:
+    - 10
+  candidate:
+    symptom: 网关报路径不可用
+    root_cause: 网关无法为 unit id 配置出下行路径 (网关未配置该从站或下行链路断)
+    suggested_action: 核对网关的 unit→从站映射配置; 探测网关下游链路
+    confidence: 0.9
+    next_tools:
+    - probe_device
+- id: modbus_exc0b_gateway_target_no_response
+  protocol: modbus
+  match:
+    exception_code:
+    - 11
+  candidate:
+    symptom: 网关报目标无响应
+    root_cause: 网关路径存在但下行从站不应答 (从站掉线/串口参数不符)
+    suggested_action: 检查从站供电与串口参数 (波特率/校验位); 单独 ping/直连从站验证
+    confidence: 0.9
+- id: modbus_mbap_truncated
+  protocol: modbus
+  match:
+    check_failed:
+    - mbap_header_complete
+  candidate:
+    symptom: 帧不足 7 字节, MBAP 头不完整
+    root_cause: 半包 (TCP 分段后只截到部分) 或抓包截断; TCP 是流式协议, 单次 read 不保证一整帧
+    suggested_action: 在收发两侧按 MBAP length 字段做定长收帧; 抓包时确认未被截断
+    confidence: 0.9
+- id: modbus_protocol_id_nonzero
+  protocol: modbus
+  match:
+    check_failed:
+    - protocol_id_zero
+  candidate:
+    symptom: MBAP 协议标识非 0
+    root_cause: 中间设备改写过帧, 或这不是标准 Modbus TCP (私有变体/Modbus Plus 封装)
+    suggested_action: 确认链路上有无网关/中间件; 用设备文档核对变体协议头
+    confidence: 0.9
+- id: modbus_length_field_inconsistent
+  protocol: modbus
+  match:
+    check_failed:
+    - length_field_consistent
+  candidate:
+    symptom: MBAP 长度字段与实际字节数不符
+    root_cause: 粘包/半包 (两帧粘连或一帧截断), 或中间设备改写长度域
+    suggested_action: 按 length 字段做流式定长收帧; 抓包核对每帧边界
+    confidence: 0.9
+- id: modbus_unit_id_out_of_range
+  protocol: modbus
+  match:
+    check_failed:
+    - unit_id_in_range
+  candidate:
+    symptom: unit id 超出 0-255
+    root_cause: 帧错位 (把数据当成了头) 或上位机组包错误
+    suggested_action: 校验上位机组包偏移; 从帧头重新对齐解析
+    confidence: 0.85
+- id: modbus_function_code_unknown
+  protocol: modbus
+  match:
+    check_failed:
+    - function_code_known
+  candidate:
+    symptom: 功能码不在已知范围
+    root_cause: 非标准 fc (厂商自定义/诊断码 43/14 等), 或帧错位
+    suggested_action: 查设备手册的厂商自定义 fc 表; 确认帧边界正确
+    confidence: 0.85
+- id: modbus_exception_code_unknown
+  protocol: modbus
+  match:
+    check_failed:
+    - exception_code_known
+  candidate:
+    symptom: 异常码不在 01-0B 标准范围
+    root_cause: 厂商私有异常码, 或帧错位
+    suggested_action: 查设备手册异常码章节; 用 parse_frame 核对帧边界
+    confidence: 0.8
+- id: modbus_exception_frame_length_bad
+  protocol: modbus
+  match:
+    check_failed:
+    - exception_frame_exact_length
+  candidate:
+    symptom: 异常响应长度不是 9 字节
+    root_cause: 异常帧后粘连了其它数据 (粘包), 或抓包混入无关流量
+    suggested_action: 按 MBAP length 切帧后重新解析
+    confidence: 0.8
+- id: modbus_request_pdu_invalid
+  protocol: modbus
+  match:
+    check_failed:
+    - request_pdu_valid
+  candidate:
+    symptom: 请求 PDU 参数非法
+    root_cause: 数量越界 (fc3/4 上限 125 寄存器、fc1/2 上限 2000 点)、地址范围错误, 或 fc05 wire 值非 0x0000/0xFF00
+    suggested_action: 按 fc 的数量/地址上限重新组参; 用 validate_frame 逐项定位
+    confidence: 0.85
+- id: modbus_response_pdu_invalid
+  protocol: modbus
+  match:
+    check_failed:
+    - response_pdu_valid
+  candidate:
+    symptom: 响应字节数与数据不符
+    root_cause: 半包 (数据段未收全) 或响应被中间设备改写
+    suggested_action: 按 MBAP length 定长收全数据段再解析; 抓包核对
+    confidence: 0.85
+- id: modbus_tid_mismatch
+  protocol: modbus
+  match:
+    parse_error_contains:
+    - transaction_id mismatch
+  candidate:
+    symptom: 响应事务号与请求不一致
+    root_cause: 并发调用串包 (同一连接上多个请求交叉) 或网关错误转发
+    suggested_action: 同一连接串行收发 (等响应再发下一请求); 检查网关事务处理
+    confidence: 0.9
+- id: modbus_unit_mismatch
+  protocol: modbus
+  match:
+    parse_error_contains:
+    - unit_id mismatch
+  candidate:
+    symptom: 响应 unit 与请求不一致
+    root_cause: 网关串话 (unit 映射错) 或连接被其它主站复用
+    suggested_action: 核对网关 unit 路由; 排查同链路上的其它主站
+    confidence: 0.9
+- id: modbus_fc_mismatch
+  protocol: modbus
+  match:
+    parse_error_contains:
+    - function_code mismatch
+  candidate:
+    symptom: 响应功能码与请求不一致
+    root_cause: 设备/网关回错包, 或流式收发错位
+    suggested_action: 抓包核对请求-响应配对; 确认连接无并发调用
+    confidence: 0.85
+- id: modbus_rtu_crc_mismatch
+  protocol: modbus
+  match:
+    check_failed:
+    - rtu_crc_valid
+  candidate:
+    symptom: RTU 帧校验和错
+    root_cause: 线路噪声/波特率不符/收帧边界错位; 也可能把 TCP 帧误当 RTU 解析
+    suggested_action: 核对串口参数 (波特率/校验位/停止位); 按静默间隔切帧; 确认协议模式 (TCP 无 CRC)
+    confidence: 0.95
+- id: modbus_rtu_frame_too_short
+  protocol: modbus
+  match:
+    check_failed:
+    - rtu_min_length
+  candidate:
+    symptom: RTU 帧不足 4 字节
+    root_cause: 采集截断或帧边界错位 (把上一帧尾部当新帧头)
+    suggested_action: 按 3.5 字符静默间隔重新切帧采集
+    confidence: 0.92
+- id: modbus_rtu_exception_shape_bad
+  protocol: modbus
+  match:
+    check_failed:
+    - exception_payload_shape
+  candidate:
+    symptom: RTU 异常响应形状不对
+    root_cause: 帧边界错位或设备非标准实现
+    suggested_action: 重新切帧; 对照设备手册核对异常帧格式
+    confidence: 0.85
+- id: modbus_rtu_payload_shape_bad
+  protocol: modbus
+  match:
+    check_failed:
+    - request_payload_shape
+    - response_payload_shape
+  candidate:
+    symptom: RTU 载荷长度与功能码不符
+    root_cause: 帧边界错位 (粘包/半包) 或设备非标准实现
+    suggested_action: 按静默间隔重新切帧; 用 parse_frame 的 errors 定位第一个错位点
+    confidence: 0.85

@@ -42,8 +42,13 @@ TCP_COMMAND_NAMES: dict[int, str] = {
 
 FINS_HEADER_LEN = 10  # ICF RSV GCT DNA DA1 DA2 SNA SA1 SA2 SID
 
+# IoTServer/网关实现用 cmd=0x02 而非 0x04 做 FINS 数据交换。
+# parse_request/parse_response 接受两者; adapter 发送仍用规范值 TCP_CMD_EXCHANGE。
+FINS_EXCHANGE_COMMANDS = frozenset({TCP_CMD_EXCHANGE, TCP_CMD_CONNECT_REFUSED})
+
 # 存储区读命令 (0101); 写 (0102) 留 M3 写闸门
 CMD_MEMORY_AREA_READ = 0x0101
+CMD_MEMORY_AREA_WRITE = 0x0102
 
 # 存储区代码 (字读); 位读变体留诊断知识库, 工具只做字读
 AREA_CODES: dict[str, int] = {
@@ -169,9 +174,13 @@ def parse_tcp_header(frame: bytes) -> tuple[int, int, bytes]:
 
 
 def parse_handshake_response(frame: bytes) -> dict[str, int]:
-    """解析节点连接确认 (TCP cmd 0x01): payload = server_node(4B) + client_node(4B)。"""
+    """解析节点连接确认 (TCP cmd 0x01 或非规范的 cmd 0x00): payload = server_node(4B) + client_node(4B)。
+
+    Omron 规范要求服务器回 cmd=1; IoTServer 等模拟器回 cmd=0, 两者都接受。
+    """
     command, error, payload = parse_tcp_header(frame)
-    if command != TCP_CMD_CONNECT_CFM:
+    # 部分实现 (IoTServer 等) 回 cmd=0 而非规范的 cmd=1; 只要结构自洽就接受
+    if command not in (TCP_CMD_CONNECT_REQ, TCP_CMD_CONNECT_CFM):
         raise ValueError(
             f"expected connect-confirm (cmd {TCP_CMD_CONNECT_CFM}), got {command:#010x}"
             + (f" error={error:#010x}" if error else "")
@@ -208,7 +217,7 @@ def parse_request(frame: bytes) -> ParseResult:
     if error != 0:
         errors.append(f"tcp error field nonzero: {error:#010x}")
 
-    if command != TCP_CMD_EXCHANGE:
+    if command not in FINS_EXCHANGE_COMMANDS:
         # 握手帧: payload 即节点号, 无 FINS 层
         if command in (TCP_CMD_CONNECT_REQ, TCP_CMD_CONNECT_CFM) and len(payload) >= 4:
             (node,) = struct.unpack_from(">I", payload, 0)
@@ -220,7 +229,7 @@ def parse_request(frame: bytes) -> ParseResult:
         return ParseResult(protocol="fins", direction="req", fields=fields, valid=False, errors=errors)
     off = TCP_HEADER_LEN
     icf, rsv, gct = payload[0], payload[1], payload[2]
-    fields.append(_field(frame, "icf", icf, off, 1, "bit7=要求响应"))
+    fields.append(_field(frame, "icf", icf, off, 1, "bit6=响应标志(bit6=0为请求), bit7=网关禁止(通常置位)"))
     fields.append(_field(frame, "rsv", rsv, off + 1, 1))
     fields.append(_field(frame, "gct", gct, off + 2, 1, "网关允许次数, 通常 2"))
     for i, name in enumerate(("dna", "da1", "da2", "sna", "sa1", "sa2")):
@@ -229,11 +238,11 @@ def parse_request(frame: bytes) -> ParseResult:
     fields.append(_field(frame, "sid", sid, off + 9, 1, "service id, 请求-响应配对"))
     (cmd,) = struct.unpack_from(">H", payload, 10)
     fields.append(_field(frame, "command_code", cmd, off + 10, 2))
-    if cmd != CMD_MEMORY_AREA_READ:
-        errors.append(f"unsupported fins command {cmd:#06x} (only 0101 memory read in M2)")
+    if cmd not in (CMD_MEMORY_AREA_READ, CMD_MEMORY_AREA_WRITE):
+        errors.append(f"unsupported fins command {cmd:#06x} (supported: 0101 read, 0102 write)")
         return ParseResult(protocol="fins", direction="req", fields=fields, valid=False, errors=errors)
     if len(payload) < FINS_HEADER_LEN + 2 + 6:
-        errors.append("fins read request truncated: need area(1)+address(3)+count(2)")
+        errors.append("fins memory request truncated: need area(1)+address(3)+count(2)")
         return ParseResult(protocol="fins", direction="req", fields=fields, valid=False, errors=errors)
     area = payload[12]
     word_addr = int.from_bytes(payload[13:15], "big")
@@ -249,6 +258,11 @@ def parse_request(frame: bytes) -> ParseResult:
         errors.append(f"unknown area code {area:#04x}")
     if not 1 <= count <= MAX_READ_WORDS:
         errors.append(f"count {count} out of range 1-{MAX_READ_WORDS}")
+    if cmd == CMD_MEMORY_AREA_WRITE and len(payload) > FINS_HEADER_LEN + 2 + 6:
+        wdata = payload[FINS_HEADER_LEN + 2 + 6:]
+        wwords = [int.from_bytes(wdata[j : j + 2], "big") for j in range(0, len(wdata) - 1, 2)]
+        fields.append(_field(frame, "write_data", wwords, off + FINS_HEADER_LEN + 2 + 6, len(wdata), "write 16-bit BE words"))
+
     return ParseResult(protocol="fins", direction="req", fields=fields, valid=not errors, errors=errors)
 
 
@@ -269,7 +283,10 @@ def parse_response(frame: bytes, request: bytes | None = None) -> ParseResult:
     if error != 0:
         errors.append(f"tcp error field nonzero: {error:#010x}")
 
-    if command != TCP_CMD_EXCHANGE:
+    # IoTServer 等非标准实现对数据交换响应也回 cmd=0 而非 cmd=4。
+    # 判别方式: 握手 payload = 8B (server+client node), 数据交换 payload >= 14B
+    # (FINS header 10 + cmd 2 + end_code 2), 按 payload 长度分流。
+    if command not in FINS_EXCHANGE_COMMANDS and len(payload) < FINS_HEADER_LEN + 4:
         # 握手确认走专门解析; 请求上下文校验命令配对
         if request is not None:
             try:
@@ -297,14 +314,23 @@ def parse_response(frame: bytes, request: bytes | None = None) -> ParseResult:
     (cmd,) = struct.unpack_from(">H", payload, 10)
     fields.append(_field(frame, "command_code", cmd, off + 10, 2))
 
-    if request is not None:
+    # IoTServer 等非标准实现的响应: FINS header 全零, cmd=0x0000, end_code=0x0000,
+    # 数据直接跟在后面。检测到这种模式时跳过交叉校验和 cmd 校验。
+    is_nonstandard = (
+        cmd != CMD_MEMORY_AREA_READ
+        and payload[:FINS_HEADER_LEN] == b"\x00" * FINS_HEADER_LEN
+    )
+
+    if request is not None and not is_nonstandard:
         errors.extend(_cross_check(frame, request))
 
-    if cmd != CMD_MEMORY_AREA_READ:
-        errors.append(f"unsupported fins command {cmd:#06x} in response")
-        return ParseResult(protocol="fins", direction="resp", fields=fields, valid=False, errors=errors)
+    # 提前提取 end_code, 确保始终可用 (非标准响应也有的)
     (end_code,) = struct.unpack_from(">H", payload, 12)
     fields.append(_field(frame, "end_code", end_code, off + 12, 2, end_code_name(end_code)))
+
+    if cmd != CMD_MEMORY_AREA_READ and not is_nonstandard:
+        errors.append(f"unsupported fins command {cmd:#06x} in response")
+        return ParseResult(protocol="fins", direction="resp", fields=fields, valid=False, errors=errors)
     data = payload[14:]
     if end_code != 0x0000:
         if data:
@@ -406,3 +432,8 @@ def validate_frame(frame: bytes, direction: Literal["req", "resp"] = "resp") -> 
                 )
             )
     return checks
+
+
+
+
+

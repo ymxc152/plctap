@@ -274,13 +274,18 @@ def _melsec_response(frame: bytes) -> bytes | None:
     cmd, subcmd = struct.unpack_from("<HH", data, 0)
     if cmd != mc_codec.CMD_BATCH_READ_WORD:
         return None  # 只回 0401 批量读
-    code = data[4]
+    code = data[7]
     (count,) = struct.unpack_from("<H", data, 8)
     dev_name = mc_codec.DEVICE_CODE_NAMES.get(code)
     words = (count + 15) // 16 if dev_name in mc_codec.BIT_DEVICES else count
     resp_data = struct.pack("<H", 0x0000) + b"\x00" * (words * 2)  # 端结码 0 + 小端字值 0
-    # 回显请求头部 (网络/PC/IO/站号/定时器), 重算 data_length
-    return frame[:9] + struct.pack("<H", len(resp_data)) + resp_data
+    # 回显请求头部 (副头部换 D0 00 + 网络/PC/IO/站号), 重算响应数据长 (= 结束码+数据)
+    return (
+        mc_codec.RESPONSE_SUBHEADER_BYTES
+        + frame[2:7]
+        + struct.pack("<H", len(resp_data))
+        + resp_data
+    )
 
 
 def _fins_tcp_command(frame: bytes) -> int | None:
