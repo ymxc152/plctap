@@ -350,6 +350,58 @@ def build_read_request(
     return _header_fmt(frame_format, network, pc, module_io, module_station, timer, data_len, serial) + data
 
 
+def build_write_request(
+    device: str,
+    head_device: int,
+    values: list[int],
+    network: int = 0,
+    pc: int = 0xFF,
+    module_io: int = 0x03FF,
+    module_station: int = 0,
+    timer: int = 4,
+    subcommand: int = SUBCOMMAND_WORD_UNITS,
+    frame_format: str = FRAME_3E_BINARY,
+    serial: int = 0,
+) -> bytes:
+    """构造 1401 批量写(字单位)请求帧。
+
+    字软元件 (D/R/W): 每值一字 (0-65535, 负数按 16 位补码)。
+    位软元件 (X/Y/B/M): 每值一字的 16 个点打包 (与 0401 读的打包语义一致)。
+    """
+    if device not in DEVICE_CODES:
+        raise ValueError(
+            f"unknown device {device!r}; known: {sorted(DEVICE_CODES)} (ZR 等特殊软元件暂不支持)"
+        )
+    if subcommand != SUBCOMMAND_WORD_UNITS:
+        raise ValueError(f"only word-units subcommand 0x0000 supported, got {subcommand:#06x}")
+    for name, v in (
+        ("network", network),
+        ("pc", pc),
+        ("module_station", module_station),
+    ):
+        if not 0 <= v <= 0xFF:
+            raise ValueError(f"{name} {v} out of range 0-255")
+    if not 0 <= module_io <= 0xFFFF:
+        raise ValueError(f"module_io {module_io} out of range")
+    if timer not in MONITOR_TIMER_VALUES:
+        raise ValueError(f"timer {timer} not in {MONITOR_TIMER_VALUES}")
+    if not 0 <= head_device <= 0xFFFFFF:
+        raise ValueError(f"head_device {head_device} out of range 0-16777215 (3B)")
+    if not values:
+        raise ValueError("values must not be empty")
+    if len(values) > MAX_READ_POINTS:
+        raise ValueError(f"too many values: {len(values)} > {MAX_READ_POINTS}")
+    for i, v in enumerate(values):
+        if not -0x8000 <= v <= 0xFFFF:
+            raise ValueError(f"values[{i}] {v} out of 16-bit word range (-32768..65535)")
+    code = DEVICE_CODES[device]
+    words = [v & 0xFFFF for v in values]
+    data = _encode_pdu(frame_format, CMD_BATCH_WRITE_WORD, subcommand, code, head_device, len(words))
+    data += _encode_word_values(frame_format, words)
+    data_len = (4 if _is_ascii(frame_format) else 2) + len(data)
+    return _header_fmt(frame_format, network, pc, module_io, module_station, timer, data_len, serial) + data
+
+
 # ---------------------------------------------------------------- parse
 
 
@@ -413,9 +465,8 @@ def parse_request_fmt(frame: bytes, frame_format: str = FRAME_3E_BINARY) -> Pars
     cmd, subcmd, code, head, count = _decode_pdu(frame_format, data)
     fields.append(_field(frame, "command", cmd, hl, 4 if _is_ascii(frame_format) else 2))
     fields.append(_field(frame, "subcommand", subcmd, hl + (4 if _is_ascii(frame_format) else 2), 4 if _is_ascii(frame_format) else 2))
-    if cmd != CMD_BATCH_READ_WORD:
-        errors.append(f"unsupported command {cmd:#06x} (only 0401 batch read in M2)")
-        return ParseResult(protocol="melsec", direction="req", fields=fields, valid=False, errors=errors)
+    if cmd not in (CMD_BATCH_READ_WORD, CMD_BATCH_WRITE_WORD):
+        errors.append(f"unsupported command {cmd:#06x} (only 0401 batch read / 1401 batch write)")
     num_off = hl + 10 if _is_ascii(frame_format) else hl + 4
     code_off = hl + 8 if _is_ascii(frame_format) else hl + 7
     cnt_off = hl + 16 if _is_ascii(frame_format) else hl + 8

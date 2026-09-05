@@ -213,6 +213,62 @@ class FinsAdapter(ProtocolAdapter):
             elapsed_ms=elapsed_ms,
         )
 
+    # ------------------------------------------------------------ write
+
+    async def write(
+        self,
+        target: Target,
+        address: int,
+        values: list[int],
+        *,
+        on_frame: Callable[[str], None] | None = None,
+        point_type: str = "register",
+        timeout_ms: int | None = None,
+        **options,
+    ) -> dict:
+        """写存储区 (0102, 字单位)。area 取 CIO/W/H/A/DM/EM, 默认 DM。"""
+        if point_type != "register":
+            raise ValueError(
+                f"fins write only supports point_type='register' (word units), got {point_type!r}"
+            )
+        timeout = self.timeout(timeout_ms)
+        area = options.get("area", "DM")
+        area_code = codec.AREA_CODES.get(area)
+        if area_code is None:
+            raise ValueError(f"unknown area {area!r}; known: {sorted(codec.AREA_CODES)}")
+        sid = next(self._sids)
+
+        def _build(server_node: int) -> bytes:
+            # DA1 定向到握手确认的 server_node; 帧构建即发送前 -> on_frame 落审计
+            request = codec.build_memory_area_write(
+                sid, FINS_CLIENT_NODE, area_code, address, values, dest_node=server_node
+            )
+            if on_frame is not None:
+                on_frame(request.hex())
+            return request
+
+        started = time.perf_counter()
+        request, resp = await self._exchange(target, _build, timeout)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+        parsed = codec.parse_response(resp, request=request)
+        end_field = next((f for f in parsed.fields if f.name == "end_code"), None)
+        if end_field is None:
+            raise FinsError("malformed response: no end code found; " + "; ".join(parsed.errors))
+        end_code = end_field.value
+        if isinstance(end_code, int) and end_code != 0:
+            raise FinsError(
+                f"device returned end code {codec.end_code_name(end_code)} ({end_code:#06x})"
+                f" for area {area} address={address} count={len(values)}"
+            )
+        if not parsed.valid:
+            raise FinsError("malformed response: " + "; ".join(parsed.errors))
+        return {
+            "request_frame": request.hex(),
+            "response_frame": resp.hex(),
+            "elapsed_ms": elapsed_ms,
+        }
+
     # ------------------------------------------------------------ send_raw
 
     async def send_raw(

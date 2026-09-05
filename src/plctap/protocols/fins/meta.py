@@ -11,4 +11,5 @@ META = ProtocolMeta(
     data_types=["uint16", "int16", "float32"],
     vendor_hints=["Omron", "欧姆龙", "OMRON", "Sysmac"],
     read_options={'area': 'CIO/W/H/A/DM/EM (默认 DM)'},
+    write_options={'area': 'CIO/W/H/A/DM/EM (默认 DM)', 'values': '16 位字列表 (大端上线, 0102)'},
 )
