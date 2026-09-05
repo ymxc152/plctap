@@ -30,6 +30,18 @@ from plctap.protocols.s7 import meta as _meta
 _pdu_ref_counter = itertools.count(1)
 
 
+def _resolve_db_number(area: str, options: dict) -> int:
+    """db_number 仅对 area=DB 有意义; 非 DB 区显式传非 0 直接报错而非静默发错帧。"""
+    if area == "DB":
+        return options.get("db_number", 1)
+    db_number = options.get("db_number", 0)
+    if db_number != 0:
+        raise ValueError(
+            f"db_number is only valid for area='DB' (area={area!r}, db_number={db_number})"
+        )
+    return 0
+
+
 @register_adapter
 class S7Adapter(ProtocolAdapter):
     name = "s7"
@@ -174,7 +186,7 @@ class S7Adapter(ProtocolAdapter):
     ) -> ReadResult:
         timeout = self.timeout(timeout_ms)
         area = options.get("area", "DB")
-        db_number = options.get("db_number", 1)
+        db_number = _resolve_db_number(area, options)
         rack = options.get("rack", 0)
         slot = options.get("slot", 1)
 
@@ -211,7 +223,7 @@ class S7Adapter(ProtocolAdapter):
     ) -> dict:
         timeout = self.timeout(options.get("timeout_ms"))
         area = options.get("area", "DB")
-        db_number = options.get("db_number", 1)
+        db_number = _resolve_db_number(area, options)
         rack = options.get("rack", 0)
         slot = options.get("slot", 1)
 

@@ -239,3 +239,27 @@ def test_validate_frame_real_plc_response():
     by_name = {c.name: c for c in checks}
     assert by_name["function_valid"].passed
     assert by_name["return_code"].passed
+
+# ---------------------------------------------------------------- db_number 解析
+
+
+def test_resolve_db_number_db_default():
+    from plctap.protocols.s7.adapter import _resolve_db_number
+
+    assert _resolve_db_number("DB", {}) == 1
+    assert _resolve_db_number("DB", {"db_number": 5}) == 5
+
+
+def test_resolve_db_number_non_db_defaults_zero():
+    from plctap.protocols.s7.adapter import _resolve_db_number
+
+    for area in ("M", "I", "Q"):
+        assert _resolve_db_number(area, {}) == 0
+
+
+def test_resolve_db_number_non_db_rejects_explicit():
+    # 回归: area=M 显式/默认漏传 db_number 曾静默发出 db=1 帧导致读错数据
+    from plctap.protocols.s7.adapter import _resolve_db_number
+
+    with pytest.raises(ValueError, match="db_number"):
+        _resolve_db_number("M", {"db_number": 1})

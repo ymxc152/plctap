@@ -407,3 +407,27 @@ def test_parse_rtu_fc16_response_auto_direction():
     by_name = {f.name: f.value for f in r.fields}
     assert by_name["address"] == 0
     assert by_name["quantity"] == 2
+
+def test_validate_rtu_fc16_request_shape_ok():
+    # 合法 fc16 请求: addr+fc+start2+qty2+bc+data4+crc2 = 13B, 不应被误报 shape
+    body = bytes.fromhex("0110000000020441424344")
+    frame = body + struct.pack("<H", _rtu_crc(body))
+    checks = {c.name: c for c in codec.validate_rtu(frame, "req")}
+    assert checks["request_payload_shape"].passed, checks["request_payload_shape"].detail
+
+
+def test_validate_rtu_fc16_request_byte_count_mismatch_fails():
+    # qty=3 但 byte_count=4: 自洽性破坏, 必须报 shape 失败
+    body = bytes.fromhex("0110000000030441424344")
+    frame = body + struct.pack("<H", _rtu_crc(body))
+    checks = {c.name: c for c in codec.validate_rtu(frame, "req")}
+    assert not checks["request_payload_shape"].passed, checks["request_payload_shape"].detail
+
+
+def test_validate_rtu_fc16_auto_direction_request():
+    # auto 方向: 13B fc16 必须判为请求, 且全项通过 (回归: auto 曾把 13B 判成响应)
+    body = bytes.fromhex("0110000000020441424344")
+    frame = body + struct.pack("<H", _rtu_crc(body))
+    checks = codec.validate_rtu(frame)  # direction=auto
+    failed = [c for c in checks if not c.passed]
+    assert not failed, [c.detail for c in failed]

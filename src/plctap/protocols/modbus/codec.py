@@ -623,15 +623,35 @@ def validate_rtu(frame: bytes, direction: Literal["req", "resp"] = "auto") -> li
                               passed=(fc & 0x7F) in KNOWN_FCS,
                               detail=f"function_code={fc:#04x}"))
     if direction == "auto":
-        direction = "req" if len(frame) == 8 else "resp"
+        # 与 parse_rtu 同规则: fc16 响应恒 8B 回显 (请求含数据区 >=11B), 其余 8B 视作请求
+        if (fc & 0x7F) == WRITE_MULTIPLE_REGISTERS:
+            direction = "resp" if len(frame) == 8 else "req"
+        else:
+            direction = "req" if len(frame) == 8 else "resp"
     if fc & EXCEPTION_FLAG:
         checks.append(CheckResult(name="exception_payload_shape",
                                   passed=len(frame) == 5,
                                   detail=f"exception frame must be 5 bytes (addr+fc|0x80+code+crc2), got {len(frame)}"))
     elif direction == "req":
-        checks.append(CheckResult(name="request_payload_shape",
-                                  passed=len(frame) == 8,
-                                  detail=f"read/write request must be 8 bytes, got {len(frame)}"))
+        if fc == WRITE_MULTIPLE_REGISTERS:
+            # fc16 请求: addr+fc+start2+qty2+bc1+data(bc)+crc2 -> 总长 9+bc,
+            # 且 byte_count 必须等于 qty*2 (此前硬编码 8B 把合法 fc16 请求误报)
+            if len(frame) >= 7:
+                bc = frame[6]
+                qty = int.from_bytes(frame[4:6], "big")
+                checks.append(CheckResult(
+                    name="request_payload_shape",
+                    passed=len(frame) == 9 + bc and bc == qty * 2,
+                    detail=f"fc16 request: length {len(frame)} vs 9+byte_count {bc}; "
+                           f"byte_count {bc} vs qty*2 {qty*2}"))
+            else:
+                checks.append(CheckResult(
+                    name="request_payload_shape", passed=False,
+                    detail=f"fc16 request too short: {len(frame)} bytes, need >= 7"))
+        else:
+            checks.append(CheckResult(name="request_payload_shape",
+                                      passed=len(frame) == 8,
+                                      detail=f"read/write request must be 8 bytes, got {len(frame)}"))
     else:
         # 响应形状: 写单点响应 (fc05/06/0f/10) 是 8 字节回显; 读响应帧长
         # 恒为 5 + byte_count (addr+fc+bc+data+crc2)。byte_count 与帧长
