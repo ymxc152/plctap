@@ -143,6 +143,12 @@ def _match_frame(entry: dict[str, Any], frame: _FrameFacts) -> bool:
         for name, values in m["field"].items():
             if frame.fields.get(name) not in values:
                 return False
+    if "field_absent" in m:
+        # 字段缺失匹配: 用于区分同字段不同语义的帧 (如 FINS TCP cmd=0x02
+        # 既可能是连接拒绝 (无 FINS 载荷) 也可能是数据交换响应 (带 icf))
+        for name in m["field_absent"]:
+            if name in frame.fields:
+                return False
     if "direction" in m and frame.direction != m["direction"]:
         return False
     return True
@@ -255,7 +261,7 @@ def diagnose(
 def _needs_frame(entry: dict[str, Any]) -> bool:
     """条目含任一帧级条件就必须有帧命中; 仅 probe 条目的条目无需帧。"""
     m = entry.get("match", {})
-    return any(k in m for k in ("exception_code", "end_code", "parse_error_contains", "check_failed", "field", "direction"))
+    return any(k in m for k in ("exception_code", "end_code", "parse_error_contains", "check_failed", "field", "field_absent", "direction"))
 
 
 def _coerce_frame(hexstr: str, observations: list[str]) -> bytes | None:

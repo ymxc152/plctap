@@ -1,0 +1,71 @@
+# Siemens S7comm 故障知识库 (高频真机故障)
+# 条目经 diagnose 的帧级证据匹配: S7 响应项的 return_code 字段 (0xFF=成功)
+entries:
+- id: s7_return_code_access_denied
+  protocol: s7
+  match:
+    field:
+      return_code:
+      - 3
+  candidate:
+    symptom: S7 项返回 ACCESS_DENIED (0x03)
+    root_cause: CPU 通信保护拒绝访问 —— 最常见为 S7-1200/1500 未勾选"允许来自
+      远程对象的 PUT/GET 通信访问" (默认关闭), 或目标区受保护 (诊断区/系统区/授权级不足)
+    suggested_action: TIA Portal → 设备组态 → 保护与安全 → 勾选"允许来自远程对象
+      的 PUT/GET 通信访问"; 核对 CPU 保护级别与口令
+    confidence: 0.9
+    next_tools:
+    - plc_read
+- id: s7_return_code_address_out_of_range
+  protocol: s7
+  match:
+    field:
+      return_code:
+      - 5
+  candidate:
+    symptom: S7 项返回 ADDRESS_OUT_OF_RANGE (0x05)
+    root_cause: 偏移越界 / DB 号不存在; S7-1200/1500 优化 DB (优化的块访问) 无固
+      定绝对偏移, 按绝对偏移访问会失败或读回错位数据
+    suggested_action: 核对 DB 号与起始偏移; 优化块需在 TIA 中取消"优化的块访问"
+      重建下载 (经典 S7comm 不支持符号寻址, 只能按非优化块的绝对偏移访问)
+    confidence: 0.85
+    next_tools:
+    - plc_read
+- id: s7_return_code_invalid_data_type
+  protocol: s7
+  match:
+    field:
+      return_code:
+      - 6
+  candidate:
+    symptom: S7 项返回 INVALID_DATA_TYPE (0x06)
+    root_cause: 传输尺寸 (transport size) 与数据长度/区类型不匹配 (如按 BYTE/WORD
+      尺寸访问 REAL 区位数不符)
+    suggested_action: 核对 transport size 与 count 的位/字节换算; 调整读数量
+    confidence: 0.85
+- id: s7_return_code_not_supported
+  protocol: s7
+  match:
+    field:
+      return_code:
+      - 7
+  candidate:
+    symptom: S7 项返回 NOT_SUPPORTED (0x07)
+    root_cause: CPU 不支持该访问方式组合 (老 CPU 不支持的区/传输尺寸, 或固件限制);
+      部分 1200/1500 固件对未授权 PUT/GET 也回此码
+    suggested_action: 换用标准区 (DB/M/I/Q) 与 BYTE/WORD 尺寸重试; 仍失败则检查
+      PUT/GET 许可与固件版本
+    confidence: 0.8
+- id: s7_return_code_object_not_found
+  protocol: s7
+  match:
+    field:
+      return_code:
+      - 10
+  candidate:
+    symptom: S7 项返回 OBJECT_NOT_FOUND (0x0A)
+    root_cause: 访问对象不存在 —— DB 未下载/已删除、块编号错、或 rack/slot 定位
+      到不存在的 CPU
+    suggested_action: 确认块已下载且编号正确; 核对 rack/slot (S7-300 通常 0/2,
+      1200/1500 为 0/0 或 0/1)
+    confidence: 0.9

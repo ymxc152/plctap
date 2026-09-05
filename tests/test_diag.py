@@ -30,7 +30,7 @@ def test_kb_entry_shape(entry):
     c = entry["candidate"]
     assert c["symptom"] and c["root_cause"] and c["suggested_action"]
     assert 0 < c["confidence"] <= 1
-    assert entry["protocol"] in ("modbus", "fins", "melsec", "any")
+    assert entry["protocol"] in ("modbus", "fins", "melsec", "s7", "any")
     m = entry.get("match", {})
     assert isinstance(m, dict)
     if "failure_class" in m:
@@ -112,7 +112,19 @@ def test_fins_end_code_1101():
 def test_fins_handshake_refused_by_tcp_command():
     frame = fins_codec.build_tcp_frame(fins_codec.TCP_CMD_CONNECT_REFUSED, b"\x00" * 8)
     r = diagnose("fins", frames_hex=[frame.hex()])
-    assert any(c.symptom == "PLC 回节点连接拒绝 (TCP cmd 0x02)" for c in r.candidates)
+    assert any(c.symptom == "PLC 回节点连接拒绝 (TCP cmd 0x02 且无 FINS 载荷)" for c in r.candidates)
+
+
+def test_fins_cmd2_data_response_not_misread_as_refused():
+    """回归: 主流实现的 cmd 0x02 数据交换响应 (带 FINS 载荷) 不得命中连接拒绝条目。"""
+    resp = fins_codec.build_tcp_frame(
+        fins_codec.TCP_CMD_DATA_SEND,
+        bytes([0xC0, 0x00, 0x02]) + bytes([0x00, 1, 0x00]) + bytes([0x00, 2, 0x00])
+        + bytes([1]) + struct.pack(">H", fins_codec.CMD_MEMORY_AREA_READ)
+        + struct.pack(">H", 0) + b"\x00" * 4,
+    )
+    r = diagnose("fins", frames_hex=[resp.hex()])
+    assert not any("拒绝" in c.symptom for c in r.candidates)
 
 
 def test_fins_bad_magic():

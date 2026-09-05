@@ -51,6 +51,13 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
 ]
+# e2e: tests/e2e 用第三方权威实现做交叉验证 (uv sync --group e2e)
+e2e = [
+    "pymodbus>=3.9",
+    "python-snap7>=3.1",
+    "pymcprotocol>=0.3",
+    "fins>=1.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -70,5 +77,8 @@ exclude = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "e2e: 跨厂商实机交叉验证 (需要 --group e2e 的第三方库; 缺库自动跳过)",
+]
 testpaths = ["tests"]
 

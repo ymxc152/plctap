@@ -45,10 +45,13 @@ entries:
     field:
       tcp_command:
       - 2
+    field_absent:
+    - icf
     direction: resp
   candidate:
-    symptom: PLC 回节点连接拒绝 (TCP cmd 0x02)
-    root_cause: 客户端节点号与网络中已有节点冲突, 或 PLC 连接数已满
+    symptom: PLC 回节点连接拒绝 (TCP cmd 0x02 且无 FINS 载荷)
+    root_cause: 客户端节点号与网络中已有节点冲突, 或 PLC 连接数已满 (带 FINS
+      载荷的 cmd 0x02 帧是主流实现的数据交换响应, 不属此类)
     suggested_action: 换客户端节点号; 查 PLC 的 FINS/TCP 连接数配置与已有客户端
     confidence: 0.9
 - id: fins_end_code_unknown

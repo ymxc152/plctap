@@ -22,8 +22,9 @@ def interpret_registers(
 
     - uint16/int16: 每寄存器一个值 (int16 做补码转换)
     - float32: 两个连续寄存器合成一个 32 位值, byteorder 决定组合:
-      "big" = 高字在前、字内大端 (ABCD); "little" = 低字在前、字内小端 (DCBA)。
-      字交换等其它厂商变体 (如 CDAB) 由知识库描述, 需要时再作为显式档位加入。
+      "big" = 高字在前、字内大端 (ABCD); "little" = 低字在前 (字交换 CDAB)。
+      完整四种字序 (abcd/cdab/badc/dcba) 见 interpret_all 多解释表;
+      显式按字交换读可通过 interpretations 自行对照, 无需二次读数。
     """
     if datatype is None:
         return list(raw)
@@ -59,7 +60,17 @@ def interpret_all(raw: list[int]) -> dict[str, Any]:
     用于 datatype=None 时让 Agent 一次看到所有可能解读, 避免猜错
     (D2 设计原则: "不猜, 把所有可能性摆出来")。
 
+    float32 字序变体以 ABCD 字母命名 (工控组态软件的通用叫法, A = 最高
+    字节): 两个寄存器 [w0, w1] 拆 4 字节后按不同排列组 32 位值 ——
+    - abcd: 线序直读 (big-endian, 最常见)
+    - cdab: 字交换 (不同组态软件导出的"小端字序")
+    - badc: 字内字节交换
+    - dcba: 全反 (full little-endian)
+    字节序错配是现场最高频的"数值对不上"根因, 多解释表让 Agent 自主
+    对照识别真实编码, 无需二次读数。
+
     返回字典 key = 数据类型_字节序, value = 解释后的值列表。
+    float32_big / float32_little 为兼容旧 key (分别等价 abcd / cdab)。
     """
     result: dict[str, Any] = {}
 
@@ -69,8 +80,11 @@ def interpret_all(raw: list[int]) -> dict[str, Any]:
 
     # 32 位组合 (仅偶数个寄存器时)
     if len(raw) >= 2 and len(raw) % 2 == 0:
-        result["float32_big"] = interpret_registers(raw, "float32", "big")
-        result["float32_little"] = interpret_registers(raw, "float32", "little")
+        for order in ("abcd", "cdab", "badc", "dcba"):
+            result[f"float32_{order}"] = _float32_word_order_all(raw, order)
+        # 兼容旧 key: big = abcd, little = 字交换 (cdab, 非 dcba!)
+        result["float32_big"] = result["float32_abcd"]
+        result["float32_little"] = result["float32_cdab"]
 
         int32_big: list[int] = []
         int32_little: list[int] = []
@@ -82,3 +96,19 @@ def interpret_all(raw: list[int]) -> dict[str, Any]:
         result["int32_little"] = int32_little
 
     return result
+
+
+def _float32_word_order_all(raw: Sequence[int], order: str) -> list[float]:
+    out: list[float] = []
+    for i in range(0, len(raw) - 1, 2):
+        w0, w1 = raw[i], raw[i + 1]
+        b = (w0 >> 8, w0 & 0xFF, w1 >> 8, w1 & 0xFF)
+        layout = {
+            "abcd": (b[0], b[1], b[2], b[3]),
+            "cdab": (b[2], b[3], b[0], b[1]),
+            "badc": (b[1], b[0], b[3], b[2]),
+            "dcba": (b[3], b[2], b[1], b[0]),
+        }[order]
+        (f,) = struct.unpack(">f", bytes(layout))
+        out.append(f)
+    return out

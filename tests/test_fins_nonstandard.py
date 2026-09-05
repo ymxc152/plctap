@@ -167,6 +167,20 @@ class TestInterpretAll:
         assert result["int32_big"] == [0x006401F4]
         assert result["int32_little"] == [0x01F40064]
 
+    def test_float32_word_order_variants_roundtrip(self):
+        """四种字序各自能还原以其编码的值 (3.1415927 = 0x40490FDB)。"""
+        w_abcd = [0x4049, 0x0FDB]  # 线序 [A B][C D]
+        w_cdab = [0x0FDB, 0x4049]  # 字交换
+        w_badc = [0x4940, 0xDB0F]  # 字内字节交换
+        w_dcba = [0xDB0F, 0x4940]  # 全反
+        r = interpret_all(w_abcd)
+        assert r["float32_abcd"] == [pytest.approx(3.1415927, rel=1e-6)]
+        assert r["float32_big"] == r["float32_abcd"]  # 兼容别名
+        assert interpret_all(w_cdab)["float32_cdab"] == [pytest.approx(3.1415927, rel=1e-6)]
+        assert interpret_all(w_cdab)["float32_little"] == interpret_all(w_cdab)["float32_cdab"]
+        assert interpret_all(w_badc)["float32_badc"] == [pytest.approx(3.1415927, rel=1e-6)]
+        assert interpret_all(w_dcba)["float32_dcba"] == [pytest.approx(3.1415927, rel=1e-6)]
+
     def test_float32_big(self):
         # 1.0 = 0x3F800000: big = [0x3F80, 0x0000]
         result = interpret_all([0x3F80, 0x0000])

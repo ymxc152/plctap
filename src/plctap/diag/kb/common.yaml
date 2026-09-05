@@ -42,16 +42,24 @@ entries:
     confidence: 0.7
 references:
 - protocol: modbus
-  note: 'Modbus 寄存器线上为大端; float32 由两个 16 位寄存器拼成, 常见两种组合: ABCD (高字在前, big) 与 DCBA (低字在前,
-    little)。读到的浮点值明显异常 (量级跳变/NaN) 时先换 byteorder 交叉验证, 再怀疑设备。
+  note: 'Modbus 寄存器线上为大端; float32 由两个 16 位寄存器拼成, 四种字序 (A=最高字节):
+    ABCD 线序直读 / CDAB 字交换 / BADC 字内字节交换 / DCBA 全反。不同组态软件导出
+    顺序不同, 字序错配是现场"数值对不上"的最高频根因。datatype 不传时 interpretations
+    一次给出全部四种解释, 对照预期值即可锁定真实编码, 无需二次读数。
 
     '
 - protocol: fins
-  note: 'FINS 全大端。float32 组合: big=高字在前 (原生日系组态常见)。 读到的浮点值明显异常时先换 byteorder 交叉验证。
+  note: 'FINS 全大端。float32 原生 ABCD (interpretations 的 float32_abcd)。 读到
+    的浮点值明显异常时先对照 interpretations 的四种字序解释, 再怀疑设备。
 
     '
 - protocol: melsec
   note: 'MC/3E 线上为小端 (与 Modbus/FINS 相反)。float32 组合: little=低字在前 (MC 原生), big=高字在前
     (组态软件导出常见)。读到的浮点值明显异常时先 换 byteorder 交叉验证。
+
+    '
+- protocol: s7
+  note: 'S7 数据区大端, float32 原生 ABCD。S7-1200/1500 的优化 DB 无固定绝对偏移,
+    经典 S7comm 按绝对偏移访问会失败 (见 kb s7_return_code_address_out_of_range)。
 
     '

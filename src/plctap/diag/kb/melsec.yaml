@@ -59,7 +59,8 @@ entries:
   candidate:
     symptom: 数据代码错误
     root_cause: '二进制/ASCII 模式不匹配 (常见: 客户端发二进制帧, PLC 配成了 ASCII 3E)'
-    suggested_action: 核对 PLC 通信格式与客户端帧模式一致; 检查帧内容是否被 ASCII 化
+    suggested_action: 核对 PLC 通信格式与客户端帧模式一致; plctap probe 对 ASCII
+      模式设备已支持自动回退 3E ASCII 请求
     confidence: 0.9
 - id: melsec_c0d8_access_forbidden
   protocol: melsec

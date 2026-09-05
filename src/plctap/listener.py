@@ -267,26 +267,40 @@ def _fins_response(frame: bytes, server_node: int | None) -> bytes | None:
 
 
 def _melsec_response(frame: bytes) -> bytes | None:
-    if len(frame) < mc_codec.FRAME_HEADER_LEN:
+    """MELSEC 0401 批量读的 respond_normal 回帧, 支持全部 4 种帧格式。
+
+    按副头部判别请求格式 (50 00/54 00 二进制, "5000"/"5400" ASCII),
+    路由回显 + 数据长 + 端结码 0 + 全零字数据 (小端/ASCII hex)。
+    """
+    # 格式判别 (与 adapter._RESP_SUBHEADER_TO_FORMAT 同规则)
+    if len(frame) >= 2 and frame[1] == 0 and frame[0] in (0x50, 0x54):
+        fmt = "4e_binary" if frame[0] == 0x54 else "3e_binary"
+    elif len(frame) >= 4 and frame[:1] in (b"5", b"D"):
+        fmt = "4e_ascii" if frame[:4] == b"5400" else "3e_ascii"
+    else:
         return None
-    data = frame[mc_codec.FRAME_HEADER_LEN:]
-    if len(data) < 10:
+    is_ascii = fmt.endswith("ascii")
+    is_4e = fmt.startswith("4e")
+    hdr = 30 if (is_ascii and is_4e) else 22 if is_ascii else 15 if is_4e else 11
+    if len(frame) < hdr:
         return None
-    cmd, subcmd = struct.unpack_from("<HH", data, 0)
+    body = frame[hdr:]
+    if len(body) < 10:
+        return None
+    cmd, _subcmd, code, _head, count = mc_codec._decode_pdu(fmt, body)
     if cmd != mc_codec.CMD_BATCH_READ_WORD:
         return None  # 只回 0401 批量读
-    code = data[7]
-    (count,) = struct.unpack_from("<H", data, 8)
     dev_name = mc_codec.DEVICE_CODE_NAMES.get(code)
     words = (count + 15) // 16 if dev_name in mc_codec.BIT_DEVICES else count
+    if is_ascii:
+        resp_data = f"{0:04X}".encode() + b"".join(f"{0:04X}".encode() for _ in range(words))
+        echo = frame[4:22] if is_4e else frame[4:14]
+        sub = b"D400" if is_4e else b"D000"
+        return sub + echo + f"{len(resp_data):04X}".encode() + resp_data
     resp_data = struct.pack("<H", 0x0000) + b"\x00" * (words * 2)  # 端结码 0 + 小端字值 0
-    # 回显请求头部 (副头部换 D0 00 + 网络/PC/IO/站号), 重算响应数据长 (= 结束码+数据)
-    return (
-        mc_codec.RESPONSE_SUBHEADER_BYTES
-        + frame[2:7]
-        + struct.pack("<H", len(resp_data))
-        + resp_data
-    )
+    echo = frame[2:11] if is_4e else frame[2:7]
+    sub = b"\xd4\x00" if is_4e else b"\xd0\x00"
+    return sub + echo + struct.pack("<H", len(resp_data)) + resp_data
 
 
 def _fins_tcp_command(frame: bytes) -> int | None:

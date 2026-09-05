@@ -224,3 +224,20 @@ async def test_respond_normal_records_both_directions(registry):
     dirs = [f["direction"] for f in frames]
     assert dirs == ["recv", "send"]
     assert frames[0]["frame_hex"] == req.hex()
+
+
+@pytest.mark.parametrize("fmt", ["3e_binary", "3e_ascii", "4e_binary", "4e_ascii"])
+def test_melsec_respond_normal_all_formats(fmt):
+    """回归: respond_normal 对全部 4 种 MELSEC 帧格式回规范响应帧。"""
+    from plctap.listener import build_normal_response
+    from plctap.protocols.melsec import codec as mc
+
+    req = mc.build_read_request("D", 100, 5, frame_format=fmt)
+    resp = build_normal_response("melsec", req)
+    assert resp is not None
+    parsed = mc.parse_response_fmt(resp, request=req, frame_format=fmt)
+    assert parsed.valid, parsed.errors
+    end_field = next(f for f in parsed.fields if f.name == "end_code")
+    assert end_field.value == 0
+    values = next(f for f in parsed.fields if f.name == "word_values")
+    assert values.value == [0] * 5
