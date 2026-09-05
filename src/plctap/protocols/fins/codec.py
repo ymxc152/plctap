@@ -4,8 +4,8 @@
 帧结构两层, 解析时都要覆盖:
 1. TCP 层: "FINS" magic(4B) + length(4B BE, = 其后字节数) + command(4B BE)
    + error(4B BE) + payload。命令 0x00 节点连接请求 / 0x01 节点连接确认 /
-   0x02 拒绝 / 0x03 状态 / 0x04 FINS 帧交换 / 0x05 连接关闭。
-2. FINS 层 (cmd=0x04 的 payload): ICF/RSV/GCT + 目标/源网络地址 5B +
+   0x02 FINS 帧发送 (生态主流; 0x04 为部分实现变体, 解析两者等价)。
+2. FINS 层: ICF/RSV/GCT + 目标/源网络地址 5B +
    SID(1B) + 命令码(2B BE)。0101 = 存储区读; 响应带端结码(2B BE) + 数据。
 
 字节序: FINS 全大端 (与 MC 相反, 知识库素材)。
@@ -26,25 +26,32 @@ TCP_HEADER_LEN = 16  # magic4 + length4 + command4 + error4
 
 TCP_CMD_CONNECT_REQ = 0x00000000
 TCP_CMD_CONNECT_CFM = 0x00000001
-TCP_CMD_CONNECT_REFUSED = 0x00000002
+# 0x02 的语义: W420/W463 "FINS frame sending" —— 主流生态值, IoTClient /
+# node-omron-fins / pypi fins 均以 0x02 发 FINS 数据帧 (经真机验证);
+# 拒绝连接以连接确认帧的 error 字段承载 (如 0x21 已连接), 短 payload 的
+# 0x02 帧在 auto 方向判别中仍按 refused 处理。
+TCP_CMD_DATA_SEND = 0x00000002
+TCP_CMD_CONNECT_REFUSED = TCP_CMD_DATA_SEND  # 旧名兼容
 TCP_CMD_CONNECT_STATUS = 0x00000003
+# 0x04: 部分手册/实现记录的 FINS 帧交换值, 解析侧与 0x02 等价接受
 TCP_CMD_EXCHANGE = 0x00000004
 TCP_CMD_CLOSE = 0x00000005
 
 TCP_COMMAND_NAMES: dict[int, str] = {
     TCP_CMD_CONNECT_REQ: "NODE_CONNECTION_REQUEST",
     TCP_CMD_CONNECT_CFM: "NODE_CONNECTION_CONFIRM",
-    TCP_CMD_CONNECT_REFUSED: "NODE_CONNECTION_REFUSED",
+    TCP_CMD_DATA_SEND: "FINS_FRAME_SENDING",
+    TCP_CMD_EXCHANGE: "FINS_FRAME_EXCHANGE_VARIANT",
     TCP_CMD_CONNECT_STATUS: "NODE_CONNECTION_STATUS",
-    TCP_CMD_EXCHANGE: "FINS_FRAME_EXCHANGE",
     TCP_CMD_CLOSE: "CONNECTION_CLOSED",
 }
 
 FINS_HEADER_LEN = 10  # ICF RSV GCT DNA DA1 DA2 SNA SA1 SA2 SID
 
-# IoTServer/网关实现用 cmd=0x02 而非 0x04 做 FINS 数据交换。
-# parse_request/parse_response 接受两者; adapter 发送仍用规范值 TCP_CMD_EXCHANGE。
-FINS_EXCHANGE_COMMANDS = frozenset({TCP_CMD_EXCHANGE, TCP_CMD_CONNECT_REFUSED})
+# FINS 数据交换在生态中存在 0x02 (主流) 与 0x04 (变体) 两种 TCP 命令值。
+# parse_request/parse_response/诊断/监听一律两者都接受;
+# adapter 发送用 0x02 —— 与真实设备及主流客户端互通面最大。
+FINS_EXCHANGE_COMMANDS = frozenset({TCP_CMD_EXCHANGE, TCP_CMD_DATA_SEND})
 
 # 存储区读命令 (0101); 写 (0102) 留 M3 写闸门
 CMD_MEMORY_AREA_READ = 0x0101
@@ -153,7 +160,54 @@ def build_read_request(
         + struct.pack(">HB", address, 0)  # 字地址 2B + 位地址 1B
         + struct.pack(">H", count)
     )
-    return build_tcp_frame(TCP_CMD_EXCHANGE, fins)
+    return build_tcp_frame(TCP_CMD_DATA_SEND, fins)
+
+
+def build_memory_area_write(
+    sid: int,
+    client_node: int,
+    area_code: int,
+    address: int,
+    values: list[int],
+    dest_network: int = 0,
+    dest_node: int = 0,
+    dest_unit: int = 0,
+) -> bytes:
+    """构造 0102 存储区写请求 (完整 FINS/TCP 交换帧, 字单位)。
+
+    values 为 16 位字 (0-65535, 负数按 16 位补码), 大端上线。
+    """
+    if not 0 <= sid <= 0xFF:
+        raise ValueError(f"sid {sid} out of range 0-255")
+    if area_code not in AREA_CODE_NAMES:
+        raise ValueError(
+            f"unknown area code {area_code:#04x}; known: {sorted(AREA_CODE_NAMES)}"
+        )
+    if not 0 <= address <= 0xFFFF:
+        raise ValueError(f"address {address} out of range 0-65535")
+    if not values:
+        raise ValueError("values must not be empty")
+    if len(values) > MAX_READ_WORDS:
+        raise ValueError(f"too many values: {len(values)} > {MAX_READ_WORDS}")
+    for i, v in enumerate(values):
+        if not -0x8000 <= v <= 0xFFFF:
+            raise ValueError(f"values[{i}] {v} out of 16-bit word range (-32768..65535)")
+    for name, v in (("dest_network", dest_network), ("dest_node", dest_node), ("dest_unit", dest_unit)):
+        if not 0 <= v <= 0xFF:
+            raise ValueError(f"{name} {v} out of range 0-255")
+    words = [v & 0xFFFF for v in values]
+    fins = (
+        bytes([0x80, 0x00, 0x02])  # ICF=响应要求, RSV=0, GCT=2
+        + bytes([dest_network, dest_node, dest_unit])  # DNA DA1 DA2
+        + bytes([0x00, client_node, 0x00])  # SNA SA1 SA2
+        + bytes([sid])
+        + struct.pack(">H", CMD_MEMORY_AREA_WRITE)
+        + bytes([area_code])
+        + struct.pack(">HB", address, 0)  # 字地址 2B + 位地址 1B
+        + struct.pack(">H", len(words))
+        + b"".join(struct.pack(">H", w) for w in words)
+    )
+    return build_tcp_frame(TCP_CMD_DATA_SEND, fins)
 
 
 # ---------------------------------------------------------------- TCP 层 parse
@@ -328,10 +382,17 @@ def parse_response(frame: bytes, request: bytes | None = None) -> ParseResult:
     (end_code,) = struct.unpack_from(">H", payload, 12)
     fields.append(_field(frame, "end_code", end_code, off + 12, 2, end_code_name(end_code)))
 
-    if cmd != CMD_MEMORY_AREA_READ and not is_nonstandard:
+    if cmd not in (CMD_MEMORY_AREA_READ, CMD_MEMORY_AREA_WRITE) and not is_nonstandard:
         errors.append(f"unsupported fins command {cmd:#06x} in response")
         return ParseResult(protocol="fins", direction="resp", fields=fields, valid=False, errors=errors)
     data = payload[14:]
+    if cmd == CMD_MEMORY_AREA_WRITE and not is_nonstandard:
+        # 0102 写响应: end_code 之后不应再有任何数据
+        if end_code != 0x0000 and data:
+            errors.append(f"nonzero end code but {len(data)} trailing data bytes present")
+        elif end_code == 0x0000 and data:
+            errors.append(f"write response carries {len(data)} unexpected trailing data bytes")
+        return ParseResult(protocol="fins", direction="resp", fields=fields, valid=not errors, errors=errors)
     if end_code != 0x0000:
         if data:
             errors.append(f"nonzero end code but {len(data)} trailing data bytes present")

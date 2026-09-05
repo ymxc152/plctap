@@ -22,7 +22,7 @@ from plctap.models import (
     ReadResult,
     Target,
 )
-from plctap.protocols.base import adapter_for, known_protocols
+from plctap.protocols.base import ProtocolAdapter, adapter_for, known_protocols
 from plctap.protocols.fins.adapter import FinsAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.melsec.adapter import MelsecAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.s7.adapter import S7Adapter  # noqa: F401  # 注册副作用
@@ -68,11 +68,13 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         for name in known_protocols():
             cls = adapter_for(name)
             meta = cls.meta
+            # 写能力 = 闸门开启 且 适配器真正覆写了 write/send_raw
+            # (fins/melsec 未实现 write, 不能因闸门开启就向 Agent 谎报)
             entry: dict = {
                 "probe": True,
                 "read": True,
-                "write": config.allow_write,
-                "send_raw": config.allow_write,
+                "write": config.allow_write and cls.write is not ProtocolAdapter.write,
+                "send_raw": config.allow_write and cls.send_raw is not ProtocolAdapter.send_raw,
             }
             if meta:
                 entry.update({
@@ -132,7 +134,8 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         address/count 为通用地址与数量, 语义由协议决定:
         - Modbus: address 为 0 基寄存器地址, count 为寄存器个数
         - FINS: address 为字地址, count 为字数
-        - MELSEC: address 为起始编号, count 为点数
+        - MELSEC: address 为起始编号, count 为点数 (位软元件按 16 点/字)
+        - S7: address 为字节地址, count 为**字节数** (count=4 + uint16 → 2 个值)
 
         datatype 取 uint16/int16/float32, None 返回原始 16 位值 + 所有常见数据类型的多解释 (interpretations 字段), 便于 Agent 识别正确的数据类型。
         byteorder 仅影响 float32 寄存器对顺序 (big=ABCD, little=DCBA)。
@@ -380,6 +383,19 @@ def _register_write_tools(
           options.values=[v1,v2,...] 批量写多个寄存器 (fc16, 最多 123 个)。
           point_type="coil" 使用 fc05 (Write Single Coil)。
 
+        S7:
+          values 为 16 位字 (每个值占 2 字节, 大端), 逐字写入
+          area/db_number/address 起的连续区域。
+
+        FINS:
+          options.area 指定存储区 (CIO/W/H/A/DM/EM, 默认 DM);
+          values 为 16 位字 (大端), 0102 存储区写。
+
+        MELSEC:
+          options.device 指定软元件 (默认 D), options.frame_format
+          支持 3e/4E × binary/ascii; 1401 批量写字, 位软元件按打包字写
+          (每字 16 点)。
+
         返回 {"request_frame", "response_frame", "elapsed_ms"}。
         完整请求帧在发送前写入审计日志 (D5: 失败也留痕)。
         """
@@ -388,7 +404,19 @@ def _register_write_tools(
             raise ValueError(f"point_type must be 'coil'|'register', got {point_type!r}")
         values = opts.pop("values", None) or [value]
         function_code = opts.pop("function_code", None)
-        adapter = adapter_for(protocol)(pool, config)
+        adapter_cls = adapter_for(protocol)
+        adapter = adapter_cls(pool, config)
+        if adapter_cls.write is ProtocolAdapter.write:  # 类级比较 (实例 bound method 无稳定身份)
+            supported = ", ".join(
+                n for n in known_protocols()
+                if adapter_for(n).write is not ProtocolAdapter.write
+            )
+            raise ValueError(
+                f"{protocol} write 未实现 (plc_write 当前支持 {supported}); 详见 list_protocols"
+            )
+        # _function_code 仅 Modbus 语义 (fc05/06/16); 其他协议不传, 避免吞掉
+        # 基类的 "write not implemented" 明确报错
+        extra = {"_function_code": function_code} if protocol == "modbus" else {}
         return await adapter.write(
             Target(protocol=protocol, host=host, port=port, unit=unit),
             address,
@@ -400,7 +428,7 @@ def _register_write_tools(
             ),
             point_type=point_type,
             timeout_ms=timeout_ms,
-            _function_code=function_code,
+            **extra,
             **opts,
         )
 

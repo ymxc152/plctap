@@ -45,7 +45,7 @@ def test_build_read_request_layout():
     assert frame[:4] == b"FINS"
     (length,) = struct.unpack_from(">I", frame, 4)
     assert length == 8 + 18  # 10B FINS 头 + cmd2 + area1 + addr3 + count2
-    assert frame[8:12] == b"\x00\x00\x00\x04"
+    assert frame[8:12] == b"\x00\x00\x00\x02"  # 数据帧走主流 0x02 (IoTClient/node-omron-fins 同)
     # FINS 层
     p = frame[16:]
     assert p[0] == 0x80  # ICF: 响应要求

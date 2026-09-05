@@ -243,8 +243,8 @@ def _fins_response(frame: bytes, server_node: int | None) -> bytes | None:
         return fins_codec.build_tcp_frame(
             fins_codec.TCP_CMD_CONNECT_CFM, struct.pack(">II", node, client_node)
         )
-    if command != fins_codec.TCP_CMD_EXCHANGE or len(payload) < 18:
-        return None
+    if command not in fins_codec.FINS_EXCHANGE_COMMANDS or len(payload) < 18:
+        return None  # 数据帧 TCP 命令 0x02 (主流) / 0x04 (变体) 皆接受
     if struct.unpack_from(">H", payload, 10)[0] != fins_codec.CMD_MEMORY_AREA_READ:
         return None  # 只回 0101 读 (写命令留 v1.1)
     # FINS 层: [ICF,RSV,GCT][DNA,DA1,DA2][SNA,SA1,SA2][SID][cmd 2B][area 1B][addr 2B][bit 1B][count 2B]
@@ -262,7 +262,8 @@ def _fins_response(frame: bytes, server_node: int | None) -> bytes | None:
         + struct.pack(">H", 0x0000)  # 端结码 正常
         + b"\x00" * (count * 2)  # 全大端字值 0
     )
-    return fins_codec.build_tcp_frame(fins_codec.TCP_CMD_EXCHANGE, fins)
+    # 回显请求使用的 TCP 数据命令 (0x02/0x04), 与请求方实现保持一致
+    return fins_codec.build_tcp_frame(command, fins)
 
 
 def _melsec_response(frame: bytes) -> bytes | None:
