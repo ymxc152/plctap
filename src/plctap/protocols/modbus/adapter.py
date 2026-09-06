@@ -57,6 +57,26 @@ class ModbusAdapter(ProtocolAdapter):
         rest = await base.recv_exact(reader, length - 1, timeout)
         return head + rest
 
+    # ------------------------------------------ 帧构建/解析钩子 (v0.5: RTU-over-TCP 派生类覆写)
+
+    def _build_read_frame(self, tid: int, unit: int, fc: int, address: int, count: int) -> bytes:
+        return codec.build_read_request(tid, unit, fc, address, count)
+
+    def _build_write_single_frame(self, tid: int, unit: int, fc: int, address: int, value: int) -> bytes:
+        return codec.build_write_single(tid, unit, fc, address, value)
+
+    def _build_write_multi_frame(self, tid: int, unit: int, address: int, values: list[int]) -> bytes:
+        return codec.build_write_multiple(tid, unit, address, values)
+
+    def _parse(self, resp: bytes, request: bytes):
+        return codec.parse_response(resp, request=request)
+
+    async def _recv_response_untrusted(
+        self, reader: asyncio.StreamReader, timeout: float
+    ) -> bytes:
+        """send_raw 路径: 响应长度字段不可信时按可用数据收 (codec 去指出问题)。"""
+        return await asyncio.wait_for(reader.read(4096), timeout)
+
     # ------------------------------------------------------------ probe
 
     async def probe(self, target: Target) -> ProbeResult:
@@ -83,7 +103,7 @@ class ModbusAdapter(ProtocolAdapter):
                 layer_hint="connectivity",
             )
         try:
-            frame = codec.build_read_request(
+            frame = self._build_read_frame(
                 next(_transaction_ids), target.unit, codec.READ_HOLDING_REGISTERS, 0, 1
             )
             writer.write(frame)
@@ -106,7 +126,7 @@ class ModbusAdapter(ProtocolAdapter):
             writer.close()
         # 带请求上下文解析: tid/unit/fc/byte_count 四重交叉校验,
         # 回显服务器 (把请求原样弹回) 在 byte_count 校验处被识破
-        parsed = codec.parse_response(resp, request=frame)
+        parsed = self._parse(resp, frame)
         if not parsed.valid:
             return ProbeResult(
                 reachable=False,
@@ -160,12 +180,12 @@ class ModbusAdapter(ProtocolAdapter):
             raise ValueError(f"plc_read supports fc 3/4, got fc{function_code}")
         timeout = self.timeout(timeout_ms)
         tid = next(_transaction_ids)
-        request = codec.build_read_request(tid, target.unit, function_code, address, count)
+        request = self._build_read_frame(tid, target.unit, function_code, address, count)
         started = time.perf_counter()
         resp = await self._exchange(target, request, timeout)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-        parsed = codec.parse_response(resp, request=request)
+        parsed = self._parse(resp, request)
         fc_field = next(f for f in parsed.fields if f.name == "function_code")
         if isinstance(fc_field.value, int) and fc_field.value & codec.EXCEPTION_FLAG:
             exc = next(
@@ -243,14 +263,14 @@ class ModbusAdapter(ProtocolAdapter):
         if point_type == "coil":
             if len(values) != 1:
                 raise ValueError("fc05 writes exactly one coil value")
-            request = codec.build_write_single(tid, target.unit, codec.WRITE_SINGLE_COIL, address, values[0])
+            request = self._build_write_single_frame(tid, target.unit, codec.WRITE_SINGLE_COIL, address, values[0])
         elif point_type == "register":
             if len(values) == 1 and fc_override == 6:
                 # 显式指定 fc06
-                request = codec.build_write_single(tid, target.unit, codec.WRITE_SINGLE_REGISTER, address, values[0])
+                request = self._build_write_single_frame(tid, target.unit, codec.WRITE_SINGLE_REGISTER, address, values[0])
             else:
                 # 默认 fc16 (Write Multiple Registers) — 兼容绝大多数模拟器
-                request = codec.build_write_multiple(tid, target.unit, address, values)
+                request = self._build_write_multi_frame(tid, target.unit, address, values)
         else:
             raise ValueError(f"point_type must be 'coil'|'register', got {point_type!r}")
         if on_frame is not None:
@@ -259,7 +279,7 @@ class ModbusAdapter(ProtocolAdapter):
         started = time.perf_counter()
         resp = await self._exchange(target, request, timeout)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
-        parsed = codec.parse_response(resp, request=request)
+        parsed = self._parse(resp, request)
         fc_field = next(f for f in parsed.fields if f.name == "function_code")
         if isinstance(fc_field.value, int) and fc_field.value & codec.EXCEPTION_FLAG:
             exc = next((f.value for f in parsed.fields if f.name == "exception_code"), 0)
@@ -298,7 +318,7 @@ class ModbusAdapter(ProtocolAdapter):
                 if validate_length:
                     resp = await self._recv_response(conn.reader, timeout)
                 else:
-                    resp = await asyncio.wait_for(conn.reader.read(4096), timeout)
+                    resp = await self._recv_response_untrusted(conn.reader, timeout)
             except ModbusError:
                 # 长度字段已判定流失步, 连接不可复用
                 self.pool.discard(conn)
@@ -316,6 +336,93 @@ class ModbusAdapter(ProtocolAdapter):
             else:
                 self.pool.release(conn)
                 return resp
+
+
+@register_adapter
+class ModbusRtuOverTcpAdapter(ModbusAdapter):
+    """Modbus RTU over TCP 适配器 (v0.5): 串口服务器/网关的 RTU 模式。
+
+    线帧 = 从站地址 + PDU + CRC16, 无 MBAP/事务号; PDU 语义与 TCP 完全
+    一致 (构建器复用 + rtu_request_from_tcp 转换), 差异只在传输帧壳。
+    响应无长度字段, 按 FC 定长切帧 (codec.rtu_response_total_len);
+    send_raw 无法预知 FC, 退化为"收到一帧完整 RTU 响应为止"的累积读取。
+    """
+
+    name = "modbus_rtu"
+    meta = _meta.META_RTU
+
+    def _build_read_frame(self, tid: int, unit: int, fc: int, address: int, count: int) -> bytes:
+        return codec.rtu_request_from_tcp(codec.build_read_request(tid, unit, fc, address, count))
+
+    def _build_write_single_frame(self, tid: int, unit: int, fc: int, address: int, value: int) -> bytes:
+        return codec.rtu_request_from_tcp(codec.build_write_single(tid, unit, fc, address, value))
+
+    def _build_write_multi_frame(self, tid: int, unit: int, address: int, values: list[int]) -> bytes:
+        return codec.rtu_request_from_tcp(codec.build_write_multiple(tid, unit, address, values))
+
+    async def _recv_response(
+        self, reader: asyncio.StreamReader, timeout: float
+    ) -> bytes:
+        """按 FC 定长收一帧 RTU 响应。半包由 recv_exact 逐段补齐。
+
+        读响应 (fc01-04) 的定长依赖第 3 字节 byte_count, 因此先收 2 字节
+        判 FC, 读类再补收 1 字节后才问总长。
+        """
+        head = await base.recv_exact(reader, 2, timeout)
+        if head[1] in codec.READ_FCS:
+            # 读响应的定长依赖第 3 字节 byte_count
+            head += await base.recv_exact(reader, 1, timeout)
+        total = codec.rtu_response_total_len(head)
+        if total is None:
+            # 未知 FC 无法定长: 流可能已失步或对端在发垃圾, 不给它挂到超时的机会
+            raise ModbusError(
+                f"cannot frame RTU response: unknown function code {head[1]:#04x}"
+            )
+        rest = await base.recv_exact(reader, total - len(head), timeout)
+        return head + rest
+
+    async def _recv_response_untrusted(
+        self, reader: asyncio.StreamReader, timeout: float
+    ) -> bytes:
+        """send_raw 路径: 无法预知 FC, 累积读取直到长度可判定或超时。
+
+        CRC 正确性不在接收层判 —— send_raw 场景要保留完整证据帧交
+        parse_frame/validate_frame 分析。
+        """
+        buf = b""
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return buf
+            try:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=remaining)
+            except TimeoutError:
+                return buf
+            if not chunk:
+                return buf
+            buf += chunk
+            total = codec.rtu_response_total_len(buf)
+            if total is not None and len(buf) >= total:
+                return buf
+
+    def _parse(self, resp: bytes, request: bytes):
+        parsed = codec.parse_rtu(resp, direction="resp")
+        # 交叉校验: 从站地址 + 功能码回显 (parse_rtu 无请求上下文, 在此补上,
+        # 与 TCP 轨道的 tid/unit/fc 四重校验对齐 —— 网关错路由/串包检测)
+        if request:
+            if resp and resp[0] != request[0]:
+                parsed.errors.append(
+                    f"address mismatch: response {resp[0]} != request {request[0]}"
+                )
+            if len(resp) >= 2 and len(request) >= 2 and resp[1] & 0x7F != request[1] & 0x7F:
+                parsed.errors.append(
+                    f"function code mismatch: response {resp[1]:#04x} != request {request[1]:#04x}"
+                )
+            if parsed.errors:
+                parsed.valid = False
+        return parsed
 
 
 class ModbusError(RuntimeError):

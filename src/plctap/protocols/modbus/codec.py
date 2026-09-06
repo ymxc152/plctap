@@ -679,3 +679,47 @@ def validate_rtu(frame: bytes, direction: Literal["req", "resp"] = "auto") -> li
             checks.append(CheckResult(name="response_payload_shape", passed=len(frame) >= 6,
                                       detail=f"got {len(frame)} bytes"))
     return checks
+
+
+# ---------------------------------------------------------------- RTU over TCP (v0.5)
+
+
+def rtu_frame_from_pdu(unit: int, pdu: bytes) -> bytes:
+    """组装 RTU 帧: 从站地址 + PDU + CRC16 (小端)。
+
+    TCP 构建器产出的帧 = MBAP(7B) + PDU, PDU 不含 unit (unit 在 MBAP 内)。
+    这里从 TCP 帧取 unit/PDU 拼装 RTU 帧, 保证两种传输的 PDU 语义完全
+    一致 —— 一个构建器, 两种线帧。
+    """
+    if not 0 <= unit <= MAX_UNIT_ID:
+        raise ValueError(f"unit id {unit} out of range 0-{MAX_UNIT_ID}")
+    body = bytes([unit]) + pdu
+    return body + struct.pack("<H", crc16(body))
+
+
+def rtu_request_from_tcp(tcp_frame: bytes) -> bytes:
+    """Modbus TCP 请求帧 -> RTU over TCP 请求帧 (PDU 语义不变)。"""
+    return rtu_frame_from_pdu(tcp_frame[6], tcp_frame[MBAP_LEN:])
+
+
+def rtu_response_total_len(head: bytes) -> int | None:
+    """按 FC 推导 RTU 响应帧总长 (RTU 无长度字段, 接收端只能按 FC 推)。
+
+    head 为已收到的字节 (不足 2 字节返回 None 表示还需继续收):
+    - 异常响应 (fc|0x80): 恒 5 字节 (addr+fc+exception_code+crc2)
+    - 写回显 (fc05/06/15/16): 恒 8 字节 (addr+fc+addr2+value/qty2+crc2)
+    - 读响应 (fc01-04): 5 + byte_count (addr+fc+bc+data+crc2)
+    - 其它 FC: None —— 无法定长, 调用方按超时截断, codec 层报 unknown fc
+    """
+    if len(head) < 2:
+        return None
+    fc = head[1]
+    if fc & EXCEPTION_FLAG:
+        return 5
+    if fc in (WRITE_SINGLE_COIL, WRITE_SINGLE_REGISTER, 0x0F, 0x10):
+        return 8
+    if fc in READ_FCS:
+        if len(head) < 3:
+            return None
+        return 5 + head[2]
+    return None

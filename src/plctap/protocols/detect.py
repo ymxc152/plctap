@@ -25,8 +25,9 @@ DEFAULT_SCAN_PORTS = [102, 502, 2000, 44818, 5007, 6000, 9600, 9601]
 
 # 端口先验: 仅用于同级候选排序 (先验匹配端口优先), 不参与置信度评分。
 # 44818 是 EtherNet/IP 规范端口, 与本仓库 melsec 的 default_port 撞号 ——
-# 纯属数字巧合, 不构成 melsec 先验, 故必须为 None (v0.4 不支持
-# EtherNet/IP, 该端口只能靠 unknown_services + start_listener 兜底)。
+# 纯属数字巧合, 不构成 melsec 先验; EtherNet/IP 接入后更新为先验。
+# 502 上 modbus(TCP) 与 modbus_rtu 同端口共存: 先验给 TCP (规范端口语义),
+# 网关 RTU 模式靠 probe 指纹区分 (TCP 探测在 RTU 设备上落 connected_but_no_reply)。
 PORT_PRIORS: dict[int, str | None] = {
     102: "s7",
     502: "modbus",
@@ -53,6 +54,11 @@ DeepReadFn = Callable[[ProtocolAdapter, Target], Awaitable[ReadResult]]
 
 async def _deep_read_modbus(ad: ProtocolAdapter, t: Target) -> ReadResult:
     """最小读: 1 个保持寄存器。"""
+    return await ad.read(t, address=0, count=1)
+
+
+async def _deep_read_modbus_rtu(ad: ProtocolAdapter, t: Target) -> ReadResult:
+    """最小读: 1 个保持寄存器 (RTU 帧壳, addr+PDU+CRC16)。"""
     return await ad.read(t, address=0, count=1)
 
 
@@ -94,6 +100,16 @@ _PROFILES: dict[str, _Profile] = {
         ),
         deep_read=_deep_read_modbus,
         next_step="plc_read(protocol='modbus', host='{host}', port={port}, address=0, count=10)",
+    ),
+    "modbus_rtu": _Profile(
+        evidence="RTU 帧 CRC 自洽且功能码回显 (无 MBAP, addr+PDU+CRC16) — 网关/串口服务器 RTU 模式",
+        exception_evidence=(
+            "Modbus RTU 异常响应 (fc|0x80, exception_code={code:#x}) — 设备在线且回 Modbus 语义"
+        ),
+        deep_read=_deep_read_modbus_rtu,
+        next_step=(
+            "plc_read(protocol='modbus_rtu', host='{host}', port={port}, address=0, count=10)"
+        ),
     ),
     "s7": _Profile(
         evidence="TPKT+COTP 连接确认 (CC), S7comm 结构特征成立",

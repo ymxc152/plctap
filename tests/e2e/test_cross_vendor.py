@@ -128,6 +128,52 @@ def test_modbus_read_and_write_cross_check_with_pymodbus(modbus_port):
     client.close()
 
 
+# ---------------------------------------------------------------- Modbus RTU over TCP (pymodbus RTU framer)
+
+
+@pytest.fixture(scope="module")
+def modbus_rtu_port():
+    """pymodbus TCP 服务器 + RTU framer = 标准 RTU over TCP 网关行为。"""
+    from pymodbus.server import StartTcpServer
+    from pymodbus import FramerType
+
+    port = _free_port()
+    thread = threading.Thread(
+        target=StartTcpServer,
+        kwargs={"context": _pymodbus_context(),
+                "address": ("127.0.0.1", port),
+                "framer": FramerType.RTU},
+        daemon=True,
+    )
+    thread.start()
+    _wait_port(port)
+    return port
+
+
+def test_modbus_rtu_over_tcp_cross_check_with_pymodbus(modbus_rtu_port):
+    """plctap RTU 帧壳读写 <-> pymodbus RTU framer 服务器, 写入后客户端交叉读回。"""
+    from pymodbus.client import ModbusTcpClient
+    from pymodbus import FramerType
+
+    async def run():
+        adapter = adapter_for("modbus_rtu")(ConnectionPool(PlctapConfig()), PlctapConfig())
+        target = Target(protocol="modbus_rtu", host="127.0.0.1", port=modbus_rtu_port, unit=1)
+        r = await adapter.read(target, 0, 4, datatype="uint16", function_code=3)
+        w = await adapter.write(target, 8, [4321, 8765], point_type="register")
+        await adapter.pool.close_all()
+        return r.raw_registers, w
+
+    raw, _w = asyncio.run(run())
+    assert raw == [100, 200, 300, 0x41F0]
+
+    # pymodbus 客户端以同规格 (RTU framer over TCP) 交叉读回 plctap 写入的值
+    client = ModbusTcpClient("127.0.0.1", port=modbus_rtu_port, framer=FramerType.RTU)
+    assert client.connect()
+    rr = client.read_holding_registers(8, count=2, **_modbus_client_kwargs())
+    assert not rr.isError() and rr.registers == [4321, 8765]
+    client.close()
+
+
 # ---------------------------------------------------------------- S7 (snap7)
 
 
