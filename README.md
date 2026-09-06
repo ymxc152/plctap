@@ -13,6 +13,7 @@
 
 | 层 | 工具 | 说明 |
 |---|---|---|
+| 连接 | `detect_device` | **协议自动识别**: 给 IP 并发探测标准端口, 按响应指纹判定协议/端口/置信度, deep 模式验证读并生成可执行的 plc_read 建议; 全程只读 |
 | 连接 | `probe_device` | 连通性探测 + 四类失败分层归因 (MELSEC 支持 3E binary/ASCII 自动回退) |
 | 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (四协议); datatype 缺省返回 uint16/int16/float32 四种字序 (abcd/cdab/badc/dcba)/int32 多解释 |
 | 诊断 | `parse_frame` / `validate_frame` | 单帧结构化解析 / 规范校验清单 |
@@ -36,11 +37,12 @@
 
 ## 质量保障
 
-- **412 项单测**（codec 纯函数 + 适配器 + 诊断引擎 + 监听器），CI 每次推送回归。
+- **441 项单测**（codec 纯函数 + 适配器 + 诊断引擎 + 监听器 + detect_device），CI 每次推送回归。
 - **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
   pymcprotocol、pypi fins 四个第三方权威实现做真实 socket 交叉验证
   （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）。
-- **五档评测 35/35**：单帧 / RTU 完整性 / 批量日志 / FINS·MELSEC 专项 / 主动探测归因。
+- **六档评测 39/39**：单帧 / RTU 完整性 / 批量日志 / FINS·MELSEC 专项 / 主动探测归因 / 协议自动识别
+  （detect 档含"回显服务器欺骗"与"证据压过端口先验"两类反例）。
 
 ## 评测对比 (五档, 35 用例)
 

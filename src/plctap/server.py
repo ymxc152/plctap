@@ -27,6 +27,7 @@ from plctap.protocols.fins.adapter import FinsAdapter  # noqa: F401  # 注册副
 from plctap.protocols.melsec.adapter import MelsecAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.s7.adapter import S7Adapter  # noqa: F401  # 注册副作用
 from plctap.protocols.modbus.adapter import ModbusAdapter  # noqa: F401  # 注册副作用
+from plctap.protocols.detect import DetectResult, DeviceDetector
 from plctap.listener import ListenerRegistry
 from plctap.safety import AuditLog
 
@@ -50,6 +51,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     )
     audit = AuditLog(config.audit_log)
     listeners = ListenerRegistry()
+    detector = DeviceDetector(pool, config)
 
     def _adapter(protocol: str):
         return adapter_for(protocol)(pool, config)
@@ -63,6 +65,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         返回每个协议的端口提示、地址模型、数据类型和品牌线索,
         Agent 可据此推断 "这个设备该用什么协议" 而无需问用户。
         不确定协议名时先调用本工具。
+        不确定协议/端口时先调用 detect_device。
         """
         protocols = {}
         for name in known_protocols():
@@ -344,6 +347,30 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     async def get_listener_frames(port: int, limit: int = 100) -> list[dict]:
         """取监听收下的帧 (direction/peer/frame_hex), 供 parse_frame/diagnose 分析。"""
         return listeners.frames(port, limit)
+
+    # ------------------------------------------------------------ 设备自动识别
+
+    @mcp.tool
+    async def detect_device(
+        host: str,
+        ports: list[int] | None = None,
+        timeout_ms: int | None = None,
+        deep: bool = True,
+    ) -> DetectResult:
+        """设备自动识别: 给定 host 自动扫端口并判定协议 (v0.4, 全程只读)。
+
+        流程: 并发扫描候选端口 (缺省 102/502/2000/44818/5007/6000/9600/9601,
+        单端口连接预算 0.5s) -> 开放端口并发跑四协议 probe 指纹 (单协议
+        预算 timeout_ms/1000, 缺省 0.8s) -> high 候选按协议做一次最小读
+        验证 (deep=True 缺省; 成功升级 verified, 失败留痕保持 high;
+        deep=False 跳过验证读)。
+        只读保证: 全程只发握手帧 + 最小读帧, 不写任何数据; 且识别 ≠ 可访问
+        —— 例如 S7 PUT/GET 被关闭时识别照样成功, 读 DB 仍可能失败。
+        返回 DetectResult: candidates 按置信度降序 (同级先验匹配端口优先,
+        next_step 可直接作为 plc_read 调用), unknown_services 为开放但
+        四协议都不认识的端口 (可用 start_listener 钓帧分析)。
+        """
+        return await detector.detect(host, ports=ports, timeout_ms=timeout_ms, deep=deep)
 
     # ------------------------------------------------------------ 执行层 (闸门)
 

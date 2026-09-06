@@ -12,6 +12,7 @@ import asyncio
 import functools
 import struct
 import time
+from collections.abc import Callable
 
 from plctap.models import (
     ByteOrder,
@@ -111,11 +112,17 @@ class MelsecAdapter(ProtocolAdapter):
 
         请求格式依次尝试 3E binary (行业默认) 与 3E ASCII (设备配置为
         ASCII 通信时 binary 请求可能被静默丢弃或回数据代码错误); 响应副
-        头部自动判别。取最优结果: 正常完成 > 异常响应 (在线且回规范异常
+        头部自动判别。ASCII 回退仅在 binary 尝试落入 connected_but_no_reply
+        (TCP 已建立但协议交互未完成) 时进行: connection_refused/timeout 是
+        传输层故障, 与请求帧格式无关, 直接返回避免无意义的第二次连接或
+        双倍超时等待。取最优结果: 正常完成 > 异常响应 (在线且回规范异常
         帧, P3 语义) > 无响应。
         """
         results = [await self._probe_once(target, "3e_binary")]
         if self._probe_rank(results[0]) == 2:  # 正常完成, 无需 ASCII 回退
+            return results[0]
+        if results[0].failure_class != "connected_but_no_reply":
+            # connection_refused / timeout: 传输层故障, 换帧格式重试无意义
             return results[0]
         results.append(await self._probe_once(target, "3e_ascii"))
         return max(results, key=self._probe_rank)

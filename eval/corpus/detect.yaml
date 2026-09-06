@@ -1,0 +1,69 @@
+# detect 档语料: DeviceDetector 主动探测评测 (eval/fakes.py 进程内假设备)
+#
+# 与 frame/probe 档不同, 条目不喂帧也不连真机: runner 按 input.fakes 描述
+# 起 fake (端口可固定为先验端口, 可 0 系统分配), 再调
+# DeviceDetector.detect(host=127.0.0.1, ports=[各 fake 端口], deep=True)。
+# input.fakes 字段:
+#   kind           modbus / fins / melsec / echo
+#   name           fake 标识 (expect.unknown_service 按它定位端口)
+#   port           首选端口; 0 = 系统分配
+#   required_port  true = 端口本身是条目语义 (先验端口), 被占即 SKIP
+#                  (缺省 false: 被占回退系统分配端口, 端口语义不在 expect)
+#   preset         (modbus) 预置非零寄存器值, 供 deep 读验证
+# expect 判分语义:
+#   protocol        候选里出现该协议, 且为全条最高置信 (可并列)
+#   confidence_min  该协议候选置信不低于此级 (low<medium<high<verified)
+#   no_candidates   true = 期望零候选
+#   unknown_service 指名 fake 的端口须出现在 unknown_services
+# detect 模块未落地前, 本档条目由 runner 记 SKIP (不计入分母, 不算 FAIL)。
+# 顶层 protocol 固定填 detect (条目不预设协议归属; 兼容 export_prompts)。
+
+- id: detect_modbus_prior_port
+  tier: detect
+  protocol: detect
+  input:
+    fakes:
+      - name: mb_slave
+        kind: modbus
+        port: 502        # 行业先验端口 (设备就摆在该在的位置)
+        required_port: true
+        preset: 7        # 预置非零寄存器值, deep 读应读到
+  expect:
+    protocol: modbus
+    confidence_min: verified
+
+- id: detect_evidence_beats_prior
+  tier: detect
+  protocol: detect
+  input:
+    fakes:
+      - name: mb_slave
+        kind: modbus
+        port: 9600       # FINS 先验端口: 证据 (探通 + 读到数) 必须压过端口先验
+        required_port: true
+        preset: 123
+  expect:
+    protocol: modbus     # 不许因端口先验误判成 fins
+
+- id: detect_melsec_basic
+  tier: detect
+  protocol: detect
+  input:
+    fakes:
+      - name: mc_plc
+        kind: melsec
+        port: 6000       # MC/3E 常用端口; 本机被占时回退系统端口 (端口语义不在 expect)
+  expect:
+    protocol: melsec
+
+- id: detect_unknown_echo
+  tier: detect
+  protocol: detect
+  input:
+    fakes:
+      - name: echo_svc
+        kind: echo
+        port: 0          # 系统分配: 非先验端口, 无协议指纹 -> unknown
+  expect:
+    no_candidates: true
+    unknown_service: echo_svc
