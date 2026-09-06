@@ -7,11 +7,12 @@
 from __future__ import annotations
 
 import asyncio
+import struct
 
 import pytest
 
 from plctap import streams
-from plctap.listener import ListenerRegistry
+from plctap.listener import ListenerRegistry, _fins_tcp_command
 from plctap.protocols.fins import codec as fins_codec
 from plctap.protocols.melsec import codec as mc_codec
 from plctap.protocols.modbus import codec as modbus_codec
@@ -241,3 +242,71 @@ def test_melsec_respond_normal_all_formats(fmt):
     assert end_field.value == 0
     values = next(f for f in parsed.fields if f.name == "word_values")
     assert values.value == [0] * 5
+
+
+# ---------------------------------------------------------------- inject_errors (v0.4)
+
+
+async def _read_raw(port: int, data: bytes, expect_len: int, timeout: float = 2.0) -> bytes:
+    """注入帧专用: 原始读固定字节数 (坏帧的长度字段与实际不符, 合规分帧器会卡)。"""
+    reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout)
+    try:
+        writer.write(data)
+        await writer.drain()
+        buf = b""
+        while len(buf) < expect_len:
+            chunk = await asyncio.wait_for(reader.read(4096), timeout)
+            if not chunk:
+                break
+            buf += chunk
+        return buf
+    finally:
+        writer.close()
+
+
+async def test_inject_modbus_exception_then_garbage_rotation(registry):
+    port = await _start(registry, "modbus", mode="inject_errors", faults=["exception", "garbage"])
+    req = modbus_codec.build_read_request(7, 1, 3, 0, 2)
+    resp1 = await _roundtrip(port, "modbus", req)
+    # 第 1 发: 异常响应 (fc|0x80 + ILLEGAL_DATA_ADDRESS, tid/unit 回显)
+    assert resp1[0:2] == req[0:2] and resp1[6] == req[6]
+    assert resp1[7] == req[7] | 0x80 and resp1[8] == 0x02
+    # 第 2 发: 轮转到 garbage (8 字节全零, 任何解析器都该判非法)
+    resp2 = await _read_raw(port, req, 8)
+    assert resp2 == b"\x00" * 8
+
+
+async def test_inject_modbus_bad_length(registry):
+    port = await _start(registry, "modbus", mode="inject_errors", faults=["bad_length"])
+    req = modbus_codec.build_read_request(1, 1, 3, 0, 2)
+    resp = await _read_raw(port, req, 12)
+    (length,) = struct.unpack_from(">H", resp, 4)
+    assert length == len(resp) - 6 + 1  # 长度字段被 +1, 与实际字节数自相矛盾
+
+
+async def test_inject_melsec_end_code(registry):
+    port = await _start(registry, "melsec", mode="inject_errors", faults=["end_code"])
+    req = mc_codec.build_read_request("D", 0, 2)
+    resp = await _roundtrip(port, "melsec", req)
+    assert struct.unpack_from("<H", resp, 9)[0] == 0xC04F  # DEVICE_NUMBER_OUT_OF_RANGE
+
+
+async def test_inject_fins_end_code_after_handshake(registry):
+    port = await _start(registry, "fins", mode="inject_errors", faults=["end_code"])
+    # 握手确认不参与故障轮转 (设备需完成握手才继续吐帧)
+    hs = fins_codec.build_handshake_request(11)
+    resp_hs = await _roundtrip(port, "fins", hs)
+    assert _fins_tcp_command(resp_hs) == fins_codec.TCP_CMD_CONNECT_CFM
+    req = fins_codec.build_read_request(1, 11, fins_codec.AREA_CODES["DM"], 0, 2)
+    resp = await _roundtrip(port, "fins", req)
+    assert struct.unpack_from(">H", resp, 28)[0] == 0x1101  # ADDRESS_RANGE_ERROR
+
+
+async def test_inject_fault_validation(registry):
+    reg = registry
+    with pytest.raises(ValueError, match="requires faults"):
+        await reg.start("modbus", "127.0.0.1", 0, "inject_errors")
+    with pytest.raises(ValueError, match="unknown faults"):
+        await reg.start("modbus", "127.0.0.1", 0, "inject_errors", faults=["end_code"])
+    with pytest.raises(ValueError, match="only valid with"):
+        await reg.start("modbus", "127.0.0.1", 0, "record_only", faults=["garbage"])

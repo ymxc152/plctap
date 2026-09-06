@@ -7,7 +7,7 @@
 
 ![demo](docs/demo.gif)
 
-**状态: v0.3.0 (四协议读写 + 诊断引擎 + 钓鱼监听 + 跨厂商 e2e)。**
+**状态: v0.4.0 (协议自动识别 + 透明代理 + 故障注入监听 + 四协议读写 + 跨厂商 e2e)。**
 
 ## 工具
 
@@ -19,7 +19,8 @@
 | 诊断 | `parse_frame` / `validate_frame` | 单帧结构化解析 / 规范校验清单 |
 | 诊断 | `diagnose` | 规则引擎 + 故障知识库 → 结构化候选报告 |
 | 诊断 | `parse_pcap` | 解析 Wireshark 导出 pcap, 逐流逐帧 (每条 TCP 流独立判别协议, 需 `uv sync --extra eval`) |
-| 监听 | `start_listener` / `stop_listener` / `get_listener_frames` | 钓鱼模式: 设备只能当 client 时立假 server 收帧分析 (MELSEC 回帧支持全部 4 种帧格式) |
+| 监听 | `start_listener` / `stop_listener` / `get_listener_frames` | 钓鱼模式: 设备只能当 client 时立假 server 收帧分析 (三档: record_only / respond_normal / inject_errors 故障注入轮转; MELSEC 回帧支持全部 4 种帧格式) |
+| 监听 | `start_proxy` / `stop_proxy` / `get_proxy_frames` | 透明代理: 上位机 → 代理 → 真实 PLC, 透传同时分帧录制双向帧, 在线联调免 Wireshark (modbus/fins/melsec) |
 | 执行 | `plc_write` / `send_frame` | **默认不注册**, `PLCTAP_ALLOW_WRITE=true` 才启用 (闸门) |
 
 ## 写能力
@@ -37,7 +38,7 @@
 
 ## 质量保障
 
-- **441 项单测**（codec 纯函数 + 适配器 + 诊断引擎 + 监听器 + detect_device），CI 每次推送回归。
+- **452 项单测**（codec 纯函数 + 适配器 + 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
 - **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
   pymcprotocol、pypi fins 四个第三方权威实现做真实 socket 交叉验证
   （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）。

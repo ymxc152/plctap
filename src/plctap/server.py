@@ -29,6 +29,7 @@ from plctap.protocols.s7.adapter import S7Adapter  # noqa: F401  # 注册副作�
 from plctap.protocols.modbus.adapter import ModbusAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.detect import DetectResult, DeviceDetector
 from plctap.listener import ListenerRegistry
+from plctap.proxy import ProxyRegistry
 from plctap.safety import AuditLog
 
 _INSTRUCTIONS = (
@@ -51,6 +52,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     )
     audit = AuditLog(config.audit_log)
     listeners = ListenerRegistry()
+    proxies = ProxyRegistry()
     detector = DeviceDetector(pool, config)
 
     def _adapter(protocol: str):
@@ -327,16 +329,21 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         port: int = 0,
         mode: str = "record_only",
         idle_timeout_sec: int = 120,
+        faults: list[str] | None = None,
     ) -> dict:
         """起钓鱼模式监听: 待测设备只能当 client 时, 立假 server 钓出它的帧行为。
 
-        mode: record_only=只收帧不回复 (纯被动) / respond_normal=对读类请求
-        回最小"正常响应" (数据恒 0, 目的只是让设备继续吐帧, 非通用模拟器)。
+        mode 三档: record_only=只收帧不回复 (纯被动) / respond_normal=对读类
+        请求回最小"正常响应" (数据恒 0, 目的只是让设备继续吐帧, 非通用模拟器)
+        / inject_errors=正常回帧但按 faults 列表轮转注入确定性故障 (评测语料
+        生产 + 诊断引擎回归)。
+        faults (仅 inject_errors): modbus 可选 exception/bad_length/truncate,
+        fins/melsec 可选 end_code/bad_length, 全协议通用 garbage。
         收下的帧用 get_listener_frames 取, 再喂 parse_frame/diagnose。
         port=0 由系统分配, 返回实际端口。建议收满样本后 stop_listener,
         并提醒用户恢复设备原配置 (BUILD.md Skill 节)。
         """
-        return await listeners.start(protocol, host, port, mode, idle_timeout_sec)
+        return await listeners.start(protocol, host, port, mode, idle_timeout_sec, faults)
 
     @mcp.tool
     async def stop_listener(port: int) -> dict:
@@ -347,6 +354,38 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     async def get_listener_frames(port: int, limit: int = 100) -> list[dict]:
         """取监听收下的帧 (direction/peer/frame_hex), 供 parse_frame/diagnose 分析。"""
         return listeners.frames(port, limit)
+
+    # ------------------------------------------------------------ 透明代理
+
+    @mcp.tool
+    async def start_proxy(
+        protocol: str,
+        target_host: str,
+        target_port: int,
+        listen_host: str = "127.0.0.1",
+        listen_port: int = 0,
+        idle_timeout_sec: int = 120,
+    ) -> dict:
+        """起透明代理: 上位机 → 代理 → 真实 PLC, 透传同时按协议分帧录制双向帧。
+
+        现场联调时把上位机目标地址改成本代理, 无需 Wireshark 即可拿到全部
+        交互帧 (get_proxy_frames), 再喂 parse_frame/diagnose 做在线分析。
+        protocol 当前支持 modbus/fins/melsec (S7 TPKT 分帧暂不支持);
+        listen_port=0 由系统分配。代理是诊断设施: 只透传与录制, 不改写帧。
+        """
+        return await proxies.start(
+            protocol, listen_host, listen_port, target_host, target_port, idle_timeout_sec
+        )
+
+    @mcp.tool
+    async def stop_proxy(port: int) -> dict:
+        """停掉指定端口的代理, 返回录制统计 (c2s/s2c 帧数)。"""
+        return await proxies.stop(port)
+
+    @mcp.tool
+    async def get_proxy_frames(port: int, limit: int = 100) -> list[dict]:
+        """取代理录制的双向透传帧 (direction: c2s=上位机→PLC, s2c=PLC→上位机)。"""
+        return proxies.frames(port, limit)
 
     # ------------------------------------------------------------ 设备自动识别
 

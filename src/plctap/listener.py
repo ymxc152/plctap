@@ -29,8 +29,63 @@ from plctap.protocols.melsec import codec as mc_codec
 
 _LISTENER_FRAME_LIMIT = 1000  # 环形上限, 防长跑抓包内存膨胀
 
-MODES = ("record_only", "respond_normal")
+MODES = ("record_only", "respond_normal", "inject_errors")
 VALID_PROTOCOLS = tuple(streams.FRAME_HEADER_LEN)  # modbus / fins / melsec
+
+# inject_errors 故障目录 (v0.4): 按 start 时给的 faults 列表轮转注入,
+# 确定性可复现 —— 评测语料生产与诊断引擎回归的活水源头。
+# 全协议通用: garbage = 回 8 字节全零 (对任何协议都不是合法帧)
+FAULT_CATALOG: dict[str, frozenset[str]] = {
+    "modbus": frozenset({"exception", "bad_length", "truncate", "garbage"}),
+    "fins": frozenset({"end_code", "bad_length", "garbage"}),
+    "melsec": frozenset({"end_code", "bad_length", "garbage"}),
+}
+
+
+def _apply_fault(protocol: str, request: bytes, resp: bytes, fault: str) -> bytes:
+    """对已构造的正常响应做一次确定性故障注入 (纯函数)。
+
+    request 提供请求上下文 (modbus exception 需要原 fc/unit 回显)。
+    """
+    if fault == "garbage":
+        return b"\x00" * 8
+    if protocol == "modbus":
+        if fault == "exception" and len(request) >= 8:
+            return (
+                request[0:2]  # tid 回显
+                + b"\x00\x00"
+                + struct.pack(">H", 3)
+                + request[6:7]
+                + bytes([request[7] | 0x80, 0x02])  # ILLEGAL DATA ADDRESS
+            )
+        if fault == "bad_length" and len(resp) >= 6:
+            return resp[:4] + struct.pack(">H", struct.unpack_from(">H", resp, 4)[0] + 1) + resp[6:]
+        if fault == "truncate" and len(resp) > 8:
+            return resp[:-2]
+    if protocol == "fins":
+        if fault == "end_code" and len(resp) >= 30:
+            # FINS 层端结码 @ TCP头16 + FINS头10 + cmd 2, 2B BE
+            return resp[:28] + struct.pack(">H", 0x1101) + resp[30:]
+        if fault == "bad_length" and len(resp) >= 8:
+            return resp[:4] + struct.pack(">I", struct.unpack_from(">I", resp, 4)[0] + 2) + resp[8:]
+    if protocol == "melsec":
+        # 端结码/数据长字段偏移随帧格式不同, 按响应副头部嗅探
+        head2 = resp[:2]
+        if head2 == b"\xd0\x00":
+            end_off, dlen_off = 9, 7
+        elif head2 == b"\xd4\x00":
+            end_off, dlen_off = 13, 11
+        elif resp[:4] == b"D000":
+            end_off, dlen_off = 18, 14
+        elif resp[:4] == b"D400":
+            end_off, dlen_off = 26, 22
+        else:
+            end_off, dlen_off = None, None
+        if fault == "end_code" and end_off is not None and len(resp) >= end_off + 2:
+            return resp[:end_off] + struct.pack("<H", 0xC04F) + resp[end_off + 2 :]
+        if fault == "bad_length" and dlen_off is not None and len(resp) >= dlen_off + 2:
+            return resp[:dlen_off] + struct.pack("<H", struct.unpack_from("<H", resp, dlen_off)[0] + 2) + resp[dlen_off + 2 :]
+    return resp  # 未知故障名/帧过短: 原样返回 (调用方已做目录校验, 这里兜底)
 
 
 @dataclass
@@ -41,8 +96,10 @@ class _Listener:
     port: int  # 实际绑定端口 (requested_port=0 时由系统分配)
     mode: str
     server: asyncio.AbstractServer
+    faults: list[str] = field(default_factory=list)  # inject_errors 的轮转注入序列
     frames: list[dict] = field(default_factory=list)
     sent: int = 0
+    resp_count: int = 0  # 已注入响应数 (faults 轮转游标)
     started_at: float = field(default_factory=time.time)
     tasks: set[asyncio.Task] = field(default_factory=set)  # 活跃连接 handler
 
@@ -60,6 +117,7 @@ class ListenerRegistry:
         port: int,
         mode: str,
         idle_timeout_sec: int = 120,
+        faults: list[str] | None = None,
     ) -> dict:
         if protocol not in VALID_PROTOCOLS:
             raise ValueError(f"protocol must be one of {VALID_PROTOCOLS}, got {protocol!r}")
@@ -71,6 +129,18 @@ class ListenerRegistry:
             raise ValueError(f"idle_timeout_sec must be > 0, got {idle_timeout_sec}")
         if port in self._listeners:
             raise ValueError(f"listener already running on port {port}")
+        if mode == "inject_errors":
+            if not faults:
+                raise ValueError(
+                    f"inject_errors requires faults; catalog: {sorted(FAULT_CATALOG[protocol])} + garbage"
+                )
+            unknown = [f for f in faults if f != "garbage" and f not in FAULT_CATALOG[protocol]]
+            if unknown:
+                raise ValueError(
+                    f"unknown faults {unknown} for {protocol}; catalog: {sorted(FAULT_CATALOG[protocol])} + garbage"
+                )
+        elif faults:
+            raise ValueError("faults is only valid with mode='inject_errors'")
         # 端口可能被抢占 (port=0 由系统分配): 先登记后校验, 冲突由系统抛错
 
         async def _handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -90,6 +160,7 @@ class ListenerRegistry:
             port=actual_port,
             mode=mode,
             server=server,
+            faults=list(faults) if faults else [],
         )
         self._listeners[actual_port] = lst
         return {
@@ -98,6 +169,7 @@ class ListenerRegistry:
             "host": host,
             "port": actual_port,
             "mode": mode,
+            "faults": lst.faults,
             "recorded": 0,
         }
 
@@ -145,13 +217,20 @@ class ListenerRegistry:
                 if frame is None:
                     return  # EOF/超时/畸形: 结束该连接 (continue 会自旋)
                 self._record(lst, "recv", peer, frame)
-                if lst.mode != "respond_normal":
+                if lst.mode == "record_only":
                     continue
                 resp = build_normal_response(lst.protocol, frame, fins_node)
                 if resp is None:
                     continue  # 未覆盖的请求: 记帧不回复
                 if lst.protocol == "fins" and _fins_tcp_command(frame) == fins_codec.TCP_CMD_CONNECT_REQ:
                     fins_node = struct.unpack_from(">I", resp, fins_codec.TCP_HEADER_LEN)[0] & 0xFF
+                    writer.write(resp)
+                    await asyncio.wait_for(writer.drain(), timeout)
+                    self._record(lst, "send", peer, resp)
+                    continue  # 握手确认不参与故障轮转 (设备需完成握手才继续吐帧)
+                if lst.mode == "inject_errors" and lst.faults:
+                    resp = _apply_fault(lst.protocol, frame, resp, lst.faults[lst.resp_count % len(lst.faults)])
+                    lst.resp_count += 1
                 writer.write(resp)
                 await asyncio.wait_for(writer.drain(), timeout)
                 self._record(lst, "send", peer, resp)
