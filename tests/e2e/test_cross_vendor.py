@@ -154,7 +154,6 @@ def test_s7_read_cross_check_with_snap7_client(s7_port):
     """plctap 与 snap7 官方客户端对同一 DB/M 区读数逐值一致。"""
     import asyncio
 
-    import snap7
     from snap7.client import Client
     from snap7.type import Areas
 

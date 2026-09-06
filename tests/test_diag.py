@@ -216,8 +216,6 @@ def test_no_candidates_with_probe_only_non_matching():
 
 def test_kb_covers_all_modbus_validate_checks():
     """M2 验收: Modbus 校验清单的每个检查项都有 KB 条目引用。"""
-    from plctap.protocols.modbus import codec
-
     check_names = {
         "mbap_header_complete", "protocol_id_zero", "length_field_consistent",
         "unit_id_in_range", "function_code_known", "exception_code_known",

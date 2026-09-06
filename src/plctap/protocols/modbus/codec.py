@@ -301,7 +301,11 @@ def parse_response(frame: bytes, request: bytes | None = None) -> ParseResult:
 
 
 def _cross_check(frame: bytes, request: bytes) -> list[str]:
-    """响应与请求的配对校验 (事务号回显、单元号一致、功能码对应)。"""
+    """响应与请求的配对校验 (事务号回显、单元号一致、功能码对应、读响应字节数与 quantity 匹配)。
+
+    字节数校验是回显/串包甄别的关键: 网关/调试工具把请求原样弹回时,
+    tid/unit/fc 全部"匹配", 只有 byte_count != 2*quantity 能识破。
+    """
     problems: list[str] = []
     if len(request) < 8:
         return ["request too short to cross-check"]
@@ -321,6 +325,13 @@ def _cross_check(frame: bytes, request: bytes) -> list[str]:
             problems.append(f"exception response for fc{fc & 0x7F}, but request fc was {r_fc}")
     elif fc != r_fc:
         problems.append(f"function_code mismatch: request fc{r_fc}, response fc{fc}")
+    elif r_fc in (READ_HOLDING_REGISTERS, READ_INPUT_REGISTERS) and len(frame) >= 9:
+        qty = struct.unpack_from(">H", request, 10)[0] if len(request) >= 12 else 0
+        byte_count = frame[8]
+        if byte_count != qty * 2:
+            problems.append(
+                f"byte_count {byte_count} != 2 * quantity {qty} from request"
+            )
     return problems
 
 

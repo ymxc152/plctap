@@ -250,7 +250,6 @@ def _fins_response(frame: bytes, server_node: int | None) -> bytes | None:
     # FINS 层: [ICF,RSV,GCT][DNA,DA1,DA2][SNA,SA1,SA2][SID][cmd 2B][area 1B][addr 2B][bit 1B][count 2B]
     (count,) = struct.unpack_from(">H", payload, 16)
     sid = payload[9]
-    dna, da1, da2 = payload[3], payload[4], payload[5]
     sna, sa1, sa2 = payload[6], payload[7], payload[8]
     # 响应路由 = 请求路由对调; 响应端节点 (SNA/SA1) 用握手分配的 server 节点
     fins = (

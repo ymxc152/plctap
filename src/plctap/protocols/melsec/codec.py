@@ -207,25 +207,36 @@ def _parse_header_fmt(frame: bytes, frame_format: str) -> tuple:
         idx = 4
         serial = 0
         if _is_4e(frame_format):
-            serial = _dec_ascii(frame[idx : idx + 4]); idx += 4
+            serial = _dec_ascii(frame[idx : idx + 4])
+            idx += 4
             idx += 4  # 保留 2B
-        network = _dec_ascii(frame[idx : idx + 2]); idx += 2
-        pc = _dec_ascii(frame[idx : idx + 2]); idx += 2
-        io = _dec_ascii(frame[idx : idx + 4]); idx += 4
-        station = _dec_ascii(frame[idx : idx + 2]); idx += 2
-        data_len = _dec_ascii(frame[idx : idx + 4]); idx += 4
+        network = _dec_ascii(frame[idx : idx + 2])
+        idx += 2
+        pc = _dec_ascii(frame[idx : idx + 2])
+        idx += 2
+        io = _dec_ascii(frame[idx : idx + 4])
+        idx += 4
+        station = _dec_ascii(frame[idx : idx + 2])
+        idx += 2
+        data_len = _dec_ascii(frame[idx : idx + 4])
+        idx += 4
         timer = _dec_ascii(frame[idx : idx + 4])
         return sub, network, pc, io, station, timer, data_len, serial
     (sub,) = struct.unpack_from(">H", frame, 0)
     idx = 2
     serial = 0
     if _is_4e(frame_format):
-        (serial,) = struct.unpack_from("<H", frame, idx); idx += 2
+        (serial,) = struct.unpack_from("<H", frame, idx)
+        idx += 2
         idx += 2  # 保留 2B
-    network, pc = frame[idx], frame[idx + 1]; idx += 2
-    (io,) = struct.unpack_from("<H", frame, idx); idx += 2
-    station = frame[idx]; idx += 1
-    (data_len,) = struct.unpack_from("<H", frame, idx); idx += 2
+    network, pc = frame[idx], frame[idx + 1]
+    idx += 2
+    (io,) = struct.unpack_from("<H", frame, idx)
+    idx += 2
+    station = frame[idx]
+    idx += 1
+    (data_len,) = struct.unpack_from("<H", frame, idx)
+    idx += 2
     (timer,) = struct.unpack_from("<H", frame, idx)
     return sub, network, pc, io, station, timer, data_len, serial
 

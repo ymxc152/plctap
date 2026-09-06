@@ -21,7 +21,6 @@ import struct
 from typing import Callable
 import time
 
-from plctap.conn.manager import ConnectionKey
 from plctap.models import (
     ByteOrder,
     ProbeResult,
@@ -105,7 +104,15 @@ class ModbusAdapter(ProtocolAdapter):
             )
         finally:
             writer.close()
-        parsed = codec.parse_response(resp)
+        # 带请求上下文解析: tid/unit/fc/byte_count 四重交叉校验,
+        # 回显服务器 (把请求原样弹回) 在 byte_count 校验处被识破
+        parsed = codec.parse_response(resp, request=frame)
+        if not parsed.valid:
+            return ProbeResult(
+                reachable=False,
+                failure_class="connected_but_no_reply",
+                layer_hint="protocol",
+            )
         fc_field = next(
             (f for f in parsed.fields if f.name == "function_code"), None
         )

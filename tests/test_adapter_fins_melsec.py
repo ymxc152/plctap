@@ -151,7 +151,6 @@ class FakeMcServer:
                     writer.write(b"\x50\x50" + head[2:] + data)
                     await writer.drain()
                     continue
-                head_dev = data[4:7]
                 (count,) = struct.unpack_from("<H", data, 8)
                 # 位软元件 (X/Y/B/M) 按字读: 响应字数 = ceil(count/16)
                 code = data[7]
@@ -445,7 +444,6 @@ class FakeMcServerAuto:
                         writer.write(resp)
                         await writer.drain()
                         continue
-                    dev_num = int(payload[10:16], 10)
                     (count,) = (int(payload[16:20], 16),)
                     end_txt = f"{self._END:04X}"
                     words_txt = "".join(f"{(0x2000 + i) & 0xFFFF:04X}" for i in range(count))

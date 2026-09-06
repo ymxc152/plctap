@@ -82,3 +82,8 @@ markers = [
 ]
 testpaths = ["tests"]
 
+[tool.ruff.lint.per-file-ignores]
+# scripts/ 与 tests/e2e 的启动脚本先做 stdout 编码/sys.path 设置再 import, E402 属有意为之
+"scripts/*" = ["E401", "E402"]
+"tests/e2e/*" = ["E402"]
+

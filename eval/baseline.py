@@ -121,7 +121,11 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=Path("eval/results_baseline.json"))
     args = ap.parse_args()
 
-    records = [json.loads(l) for l in args.prompts.read_text(encoding="utf-8").splitlines() if l.strip()]
+    records = [
+        json.loads(line)
+        for line in args.prompts.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     answers: dict[str, str] = {}
     prev_results: dict[str, dict] = {}
     if args.only_missing and args.out.exists():
