@@ -7,20 +7,40 @@
 
 ![demo](docs/demo.gif)
 
-**状态: 开发中 (M3: 三协议 + 诊断引擎 + 钓鱼监听)。** 本 README 将随里程碑补全:
-五档评测对比表 (工具模式 vs 裸模型)、三端接入截图 (待用户环境)。
+**状态: v0.3.0 (四协议读写 + 诊断引擎 + 钓鱼监听 + 跨厂商 e2e)。**
 
 ## 工具
 
 | 层 | 工具 | 说明 |
 |---|---|---|
-| 连接 | `probe_device` | 连通性探测 + 四类失败分层归因 |
-| 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (三协议) |
+| 连接 | `probe_device` | 连通性探测 + 四类失败分层归因 (MELSEC 支持 3E binary/ASCII 自动回退) |
+| 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (四协议); datatype 缺省返回 uint16/int16/float32 四种字序 (abcd/cdab/badc/dcba)/int32 多解释 |
 | 诊断 | `parse_frame` / `validate_frame` | 单帧结构化解析 / 规范校验清单 |
 | 诊断 | `diagnose` | 规则引擎 + 故障知识库 → 结构化候选报告 |
-| 诊断 | `parse_pcap` | 解析 Wireshark 导出 pcap, 逐流逐帧 (需 `uv sync --extra eval`) |
-| 监听 | `start_listener` / `stop_listener` / `get_listener_frames` | 钓鱼模式: 设备只能当 client 时立假 server 收帧分析 |
+| 诊断 | `parse_pcap` | 解析 Wireshark 导出 pcap, 逐流逐帧 (每条 TCP 流独立判别协议, 需 `uv sync --extra eval`) |
+| 监听 | `start_listener` / `stop_listener` / `get_listener_frames` | 钓鱼模式: 设备只能当 client 时立假 server 收帧分析 (MELSEC 回帧支持全部 4 种帧格式) |
 | 执行 | `plc_write` / `send_frame` | **默认不注册**, `PLCTAP_ALLOW_WRITE=true` 才启用 (闸门) |
+
+## 写能力
+
+`PLCTAP_ALLOW_WRITE=true` 后四协议能力:
+
+| 协议 | 写语义 | options |
+|---|---|---|
+| Modbus | fc16 批量写寄存器 (默认) / fc05 线圈 / fc06 单寄存器 | `point_type`, `options.function_code`, `options.values` |
+| S7 | 16 位字写入 DB/M/I/Q 区 | `options.area`, `options.db_number` |
+| FINS | 0102 存储区写字 (CIO/W/H/A/DM/EM) | `options.area` |
+| MELSEC | 1401 批量写字, 全部 4 种帧格式 | `options.device`, `options.frame_format` |
+
+所有写/发送动作逐帧写入审计日志 (发送前留痕, 失败也留)。
+
+## 质量保障
+
+- **412 项单测**（codec 纯函数 + 适配器 + 诊断引擎 + 监听器），CI 每次推送回归。
+- **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
+  pymcprotocol、pypi fins 四个第三方权威实现做真实 socket 交叉验证
+  （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）。
+- **五档评测 35/35**：单帧 / RTU 完整性 / 批量日志 / FINS·MELSEC 专项 / 主动探测归因。
 
 ## 评测对比 (五档, 35 用例)
 
@@ -104,8 +124,8 @@ PLCTAP_DEFAULT_TIMEOUT_MS = "2000"
 ## 开发
 
 ```bash
-uv sync
-uv run pytest -q   # codec 纯函数单测 (毫秒级) + MCP 冒烟测试
+uv sync --extra eval --group e2e
+uv run pytest -q   # 单测 (codec/适配器/诊断/监听) + 跨厂商 e2e + MCP 冒烟
 uv run plctap      # 本地启动 stdio server
 ```
 

@@ -58,30 +58,51 @@ def _wait_port(port: int, timeout: float = 5.0) -> None:
 
 # ---------------------------------------------------------------- Modbus (pymodbus)
 
+# 从站数据布局 (两代 API 共用): 外部地址 -> 值
+#   0..3   -> [100, 200, 300, 0x41F0]  (读验证)
+#   8..9   -> [1234, 5678]             (写验证)
+_MB_HR_VALUES = [100, 200, 300, 0x41F0, 0, 0, 42, 7, 0, 0] + [0] * 6
+
+
+def _pymodbus_context():
+    """按 pymodbus 版本构建从站。
+
+    3.15 弃用 ModbusSlaveContext/ModbusServerContext (legacy 包装会丢失
+    块起始地址), 用新 SimDevice/SimData API —— 外部地址 0 直接对应
+    SimData 偏移 0 (无老版本的 address+1 偏移)。
+    """
+    from pymodbus.simulator.simdevice import SimDevice
+    from pymodbus.simulator.simdata import SimData, DataType
+
+    hr = SimData(address=0, count=20, values=_MB_HR_VALUES, datatype=DataType.REGISTERS)
+    co = SimData(address=0, count=16, datatype=DataType.BITS)
+    di = SimData(address=0, count=16, datatype=DataType.BITS)
+    ir = SimData(address=0, count=16, datatype=DataType.REGISTERS)
+    return SimDevice(id=1, simdata=([co], [di], [hr], [ir]))
+
 
 @pytest.fixture(scope="module")
 def modbus_port():
-    from pymodbus.datastore import (
-        ModbusSequentialDataBlock,
-        ModbusServerContext,
-        ModbusSlaveContext,
-    )
     from pymodbus.server import StartTcpServer
 
-    hr = ModbusSequentialDataBlock(0, [0, 100, 200, 300, 0x41F0, 0x0000, 42, 7, 0, 0, 0])
-    slave = ModbusSlaveContext(hr=hr, co=ModbusSequentialDataBlock(0, [0] * 32),
-                               di=ModbusSequentialDataBlock(0, [0] * 32),
-                               ir=ModbusSequentialDataBlock(0, [0] * 32))
     port = _free_port()
     thread = threading.Thread(
         target=StartTcpServer,
-        kwargs={"context": ModbusServerContext(slaves=slave, single=True),
+        kwargs={"context": _pymodbus_context(),
                 "address": ("127.0.0.1", port)},
         daemon=True,
     )
     thread.start()
     _wait_port(port)
     return port
+
+
+def _modbus_client_kwargs(**kw):
+    """3.15 起 slave= 更名 device_id=。"""
+    import pymodbus
+
+    key = "device_id" if int(pymodbus.__version__.split(".")[1]) >= 15 else "slave"
+    return {key: 1, **kw}
 
 
 def test_modbus_read_and_write_cross_check_with_pymodbus(modbus_port):
@@ -102,7 +123,7 @@ def test_modbus_read_and_write_cross_check_with_pymodbus(modbus_port):
 
     client = ModbusTcpClient("127.0.0.1", port=modbus_port)
     assert client.connect()
-    rr = client.read_holding_registers(8, count=2, slave=1)
+    rr = client.read_holding_registers(8, count=2, **_modbus_client_kwargs())
     assert not rr.isError() and rr.registers == [1234, 5678]
     client.close()
 
