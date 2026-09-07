@@ -58,6 +58,10 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     def _adapter(protocol: str):
         return adapter_for(protocol)(pool, config)
 
+    def _norm_frame_protocol(protocol: str) -> str:
+        """modbus_rtu 与 modbus 帧级同轨 (RTU 双轨判别/知识库共用), 帧级工具归一。"""
+        return "modbus" if protocol == "modbus_rtu" else protocol
+
     # ------------------------------------------------------------ 能力自述
 
     @mcp.tool
@@ -196,7 +200,8 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         frames_hex = [frame_hex] if frame_hex else None
         from plctap.diag.engine import diagnose as run_diagnosis
 
-        return run_diagnosis(protocol, frames_hex=frames_hex, log_snippet=log_snippet, probe_result=probe_result)
+        # modbus_rtu 帧与 modbus 同轨 (RTU 双轨判别), 知识库共用
+        return run_diagnosis(_norm_frame_protocol(protocol), frames_hex=frames_hex, log_snippet=log_snippet, probe_result=probe_result)
 
     @mcp.tool
     async def parse_frame(
@@ -221,6 +226,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         """
         if direction not in ("auto", "req", "resp"):
             raise ValueError(f"direction must be 'auto'|'req'|'resp', got {direction!r}")
+        protocol = _norm_frame_protocol(protocol)
         try:
             frame = bytes.fromhex(frame_hex)
         except ValueError as e:
@@ -287,6 +293,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         """
         if direction not in ("req", "resp"):
             raise ValueError(f"direction must be 'req' or 'resp', got {direction!r}")
+        protocol = _norm_frame_protocol(protocol)
         try:
             frame = bytes.fromhex(frame_hex)
         except ValueError as e:
@@ -482,7 +489,7 @@ def _register_write_tools(
             )
         # _function_code 仅 Modbus 语义 (fc05/06/16); 其他协议不传, 避免吞掉
         # 基类的 "write not implemented" 明确报错
-        extra = {"_function_code": function_code} if protocol == "modbus" else {}
+        extra = {"_function_code": function_code} if protocol in ("modbus", "modbus_rtu") else {}
         return await adapter.write(
             Target(protocol=protocol, host=host, port=port, unit=unit),
             address,
