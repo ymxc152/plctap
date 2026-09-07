@@ -1,6 +1,6 @@
 # plctap — Agent-PLC MCP Server 架构设计（ARCHITECTURE.md）
 
-> 配合 PLAN.md v2 与 BUILD.md 使用｜2026-09-03
+> 配合 PLAN.md v5 与 BUILD.md 使用｜2026-09-03 初稿，2026-09-07 对齐 v0.5.5 七端点发布态
 
 ## 1. 分层架构总览
 
@@ -11,15 +11,17 @@ MCP Server (FastMCP)
   ├─ 工具注册表（按配置条件注册，写工具默认缺席）
   ├─ 安全闸门 + 审计日志(JSONL)
   ├─ 连接管理器（连接池/空闲回收/目标级锁）
-  ├─ 协议适配器（插件式: Modbus / FINS / MELSEC）
+  ├─ 协议适配器（插件式: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip 七端点）
+  ├─ 协议识别器 detect_device（_PROFILES 注册表: 扫端口 → 指纹 → 最小读验证, 全程只读）
+  ├─ 主动诊断设施（透明代理 proxy.py / 钓鱼监听 listener.py, streams.py 分帧共用）
   ├─ Codec 纯函数层 (parse / validate / build)
   └─ 诊断引擎（规则引擎 + YAML 知识库, 纯确定性输出）
         │ TCP
-真实 PLC / ProtoForge 模拟器
+真实 PLC / 仿真器台架
 评测 harness（离线独立进程, 直连 codec, 不走 MCP）
 ```
 
-## 2. 六个关键架构决策（ADR 摘要，2026-09-03 已全部确认）
+## 2. 关键架构决策（ADR 摘要，D1-D5 于 2026-09-03 确认，D8-D9 随 v0.4 增补；D6/D7 见本节末）
 
 ### D1 会话模型：无状态参数 + 内部透明连接池
 - 工具每次携带 host/port，不暴露 connect()/session_id
@@ -48,32 +50,46 @@ MCP Server (FastMCP)
 - 开启后每次写/发送写 JSONL 审计: {ts, tool, target, frame_hex, caller}
 - 配套 MCP 审批弹窗（config.toml: default_tools_approval_mode / per-tool approval_mode）
 
+### D8 协议自动识别注册表（v0.4 增补）
+- detect 的 _PROFILES 注册表：新协议接入 = adapter register + 注册表加一条，识别逻辑零改动
+- 端口先验只影响同级候选排序、不参与置信度——44818 被 MELSEC SLMP 与 EtherNet/IP 撞号，先验显式置 None，靠响应指纹消歧
+- 全程只发握手帧 + 最小读帧（只读）；"识别 ≠ 可访问"（如 S7 PUT/GET 关闭时识别成功但读仍失败）
+
+### D9 服务端主动诊断设施（v0.4 增补）
+- 透明代理与钓鱼监听共享 streams.py 分帧纯函数（与 parse_pcap 同源），只透传/录制不改写帧
+- 监听三档 record_only / respond_normal / inject_errors（respond_scripted 留待需要时）；inject_errors 兼评测语料生成器
+- 共享连接池等基础设施，codec.build/parse 反向复用——"被连接"能力不引入第二套协议栈
+
 ## 3. 目录结构
 
 ```
 plctap/
 ├── pyproject.toml              # 入口: plctap (console script)
 ├── src/plctap/
-│   ├── server.py               # FastMCP app + 条件注册
+│   ├── server.py               # FastMCP app + 条件注册 + 工具层校验 (_validate_address 等)
 │   ├── config.py               # allow_write / 池大小 / 超时
-│   ├── safety.py               # 闸门 + 审计日志
-│   ├── conn/
-│   │   └── manager.py          # 连接池 + 目标级锁
-│   ├── protocols/
-│   │   ├── base.py             # ProtocolAdapter ABC + 注册表
-│   │   ├── modbus/{adapter.py, codec.py}
-│   │   ├── fins/{adapter.py, codec.py}
-│   │   └── melsec/{adapter.py, codec.py}
-│   ├── diag/
-│   │   ├── rules.py            # 确定性规则引擎
-│   │   ├── kb.yaml             # 50+ 故障知识库
-│   │   └── report.py           # 结构化诊断报告模型
-│   └── models.py               # ParseResult / ReadResult / DiagnosticReport
+│   ├── safety.py               # 闸门 + 审计日志 (on_frame 发送前回调)
+│   ├── models.py               # ParseResult / ReadResult / DiagnosticReport / Target
+│   ├── conn/manager.py         # 连接池 + 目标级锁
+│   ├── proxy.py / listener.py  # 透明代理 / 钓鱼监听 (v0.4)
+│   ├── streams.py              # 协议流分帧纯函数 (代理/监听/pcap 共用)
+│   ├── pcap.py                 # parse_pcap: 流聚合 → 逐流协议判别 → 逐帧解析
+│   └── protocols/
+│       ├── base.py             # ProtocolAdapter ABC + 注册表
+│       ├── auto.py             # parse_auto 方向判别 (server 与诊断引擎共用)
+│       ├── detect.py           # DeviceDetector + _PROFILES 注册表 (v0.4)
+│       ├── common.py
+│       └── modbus/ fins/ melsec/ s7/ iec104/ enip/   # 各含 adapter.py + codec.py + meta.py
+│           （modbus_rtu 与 modbus 帧级同轨，共用 codec，独立 adapter）
+├── diag/
+│   ├── engine.py               # 确定性规则引擎
+│   └── kb/{common,s7,fins,melsec,modbus,iec104,enip}.yaml   # 故障知识库 (按协议拆分)
 ├── skill/SKILL.md              # 方法论指令层
 ├── eval/
-│   ├── corpus/                 # 分层评测集 (yaml)
-│   └── benchmark.py            # vs 裸模型对比
-├── tests/                      # 纯函数单测 + MCP 冒烟测试
+│   ├── corpus/                 # 八档评测集 (yaml, 全合成帧)
+│   ├── benchmark.py            # 工具模式打分
+│   └── baseline.py             # 裸模型基线 runner
+├── tests/                      # 纯函数单测 + MCP 冒烟 + tests/e2e 六方交叉验证
 └── README.md
 ```
 
@@ -124,11 +140,16 @@ probe_device → timeout → (Skill 指引) 查网络层
 class ProtocolAdapter(ABC):
     async def probe(self, target) -> ProbeResult
     async def read(self, target, address, count, datatype) -> ReadResult
-    async def write(self, target, address, values) -> WriteResult   # 闸门后注册
+    async def write(self, target, address, values, options) -> WriteResult  # 闸门后注册
     async def send_raw(self, target, frame_hex) -> RawExchange
     # codec 纯函数: adapter.codec.parse / validate / build
 ```
-新协议 = 新目录 + 注册表登记，server.py 不改（插件式扩展点）。
+新协议 = 新目录 + 注册表登记 + detect._PROFILES 加一条，server.py 不改（插件式扩展点；
+接入手册见 docs/ADD_PROTOCOL.md）。两条地址/审计约束：
+- address 语义按协议而异：多数为 int（S7 为字节地址、count=字节数），enip 为 tag 名字符串；
+  MCP 层 schema 已放宽 int|str，由服务层 `_validate_address` 按协议校验并给出明确报错
+- **write 实现必须在构建请求帧后、任何网络动作前回调 `on_frame(request.hex())`**——
+  漏调即写操作绕过审计（D5 红线；s7 曾踩坑，ADD_PROTOCOL.md 有防复发条款）
 
 ## 7. 配置与部署
 
@@ -143,18 +164,21 @@ audit_log = "~/.plctap/audit.jsonl"
 ```
 分发: pipx/uvx 安装；Claude Desktop / Codex 各给一段配置样例；后续可加 streamable_http 远程模式。
 
+## 8. 演进路线
+- v0.1 (M1-M3): Modbus/FINS/MELSEC 读写闭环 + 诊断引擎 + 五档评测基线 + GitHub/PyPI v0.1.0
+- v0.2: S7comm + MELSEC 全 4 帧格式（pymcprotocol 字节级对照 + snap7 交叉验证）+ ProtocolMeta 自描述
+- v0.3: 写能力补全（FINS 0102 / MELSEC 1401）+ parse_pcap 逐流判别 + 四字序解释 + 跨厂商 e2e 进 CI
+- v0.4: 主动诊断旗舰——detect_device 协议识别 / 透明代理 / 监听 inject_errors 故障注入档
+- v0.5（现态）: Modbus RTU over TCP + IEC 60870-5-104 + EtherNet/IP (CIP)；发布 wheel 真实台架验收方法学；guard-main 发布闸门
+- v0.6（规划）: 产品化收官——hypothesis 模糊测试 / 工具输出 token 预算测试 / 脱敏诊断案例 / demo 扩幕 / OPC UA 轻量接入（可选）/ 裸模型基线复跑（详见 PLAN.md 第 4 节）
+- v2（候选）: 串口原生 RTU；明确不做：Web 管理界面 / server 内 LLM / DNP3 / BACnet / Profinet 二层栈
+
 ### D6 评测设计：分层难度 + 同模型双跑（已确认）
-- 五档难度: 单帧ModbusTCP / RTU CRC / FINS / 批量日志 / 主动探测
+- 五档难度起步: 单帧ModbusTCP / RTU CRC / FINS·MELSEC / 批量日志 / 主动探测；v0.5 起扩至八档（+自动识别 / iec104 / enip，后三档需台架交互、无裸问答基线）
 - 同一批帧: 裸模型问答 vs 挂MCP工具, 同一模型消融, 分层报准确率
 - 不做竞品准确率对比; README 放功能覆盖对比表即可
 
 ### D7 I/O 模型: 纯 asyncio（已确认, 随技术栈D3=Python+FastMCP）
-
-## 8. 演进路线
-- v0.1 (M1): Modbus TCP probe+read+parse/validate, ProtoForge 实测
-- v0.2 (M2): +FINS/MELSEC + 诊断引擎 + 分层评测对比表
-- v0.3 (M3): +写闸门 + parse_pcap + Skill → 发布 v1.0
-- v2.0: S7(snap7) / 数据类型自动推断 / HTTP 远程部署
 ## 9. 工业协议层角色定位（2026-09-03 补充）
 
 两个"server"概念区分：
@@ -167,10 +191,10 @@ audit_log = "~/.plctap/audit.jsonl"
            start_proxy  诊断代理: 上位机→代理→真实PLC 透明转发+录制
                         → 排查"上位机说没回 / PLC 说没发"扯皮场景
            start_listener 钓鱼模式(实习真实痛点背书):
-                        待测设备只能当client时, 立可编程假server钓出其帧行为
-                        mode: record_only / respond_normal / respond_scripted / inject_errors
-                        → 捕获畸形握手/错误字节序/重发风暴; 可按请求写入数控(CNC)
-                        → 知识库新增 client 侧故障模式类; 面试零硬件双向演示
+                        待测设备只能当client时, 立假server钓出其帧行为
+                        mode(已实现): record_only / respond_normal / inject_errors
+                        (respond_scripted 可编程回帧留待需要时)
+                        → 捕获畸形握手/错误字节序/重发风暴; inject_errors 兼评测语料生成
 - 永不做: 独立完整从站模拟器；ProtoForge 作为开发/测试依赖引入
 
 
