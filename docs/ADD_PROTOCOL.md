@@ -148,6 +148,27 @@ from plctap.protocols.your_protocol.adapter import YourAdapter  # noqa: F401
 
 > 注: 当前版本需要手动 import。后续版本会改为目录扫描自动发现。
 
+## 会话式协议的偏差（v0.6, OPC UA 案例——接入"连接能力"型协议必读）
+
+帧式协议（Modbus/FINS/MELSEC/S7/IEC 104/EtherNet/IP）走本文档主流程；会话式协议
+（OPC UA 等，客户端库封装传输与会话，无原始帧概念）按以下偏差执行：
+
+- **无 codec（跳过 Step 2）**：parse_frame/validate_frame 在 server 层对协议名**显式拒绝**
+  （报"不做帧级诊断——设计声明, 非缺陷"），diagnose 拒绝帧证据、仅走 probe 路径；
+  kb 条目只能用 probe 级匹配（failure_class），且引擎按条目 protocol 域过滤，
+  协议专属条目不得跨协议泄漏
+- **send_raw/write 是可选能力**：不实现即是正确声明——base 默认 NotImplementedError +
+  server.list_protocols 类级比较如实上报 false（v0.6 起 send_raw 从抽象方法降级，
+  否则会话协议被迫实现一个只会抛错的方法，元数据反而虚报能力）
+- **客户端库依赖**：asyncio 原生库（如 asyncua）可作运行时依赖（符合 D3）；惰性导入
+  + 缺失时给出安装提示，不阻断 server 启动其他端点
+- **browse 类工具有输出预算**：子节点/条目数硬上限 + truncated/total/shown sentinel
+  （同 parse_pcap 语义），防大地址空间撑爆 Agent 上下文
+- **交叉验证口径诚实**：客户端库对自家 server 属**自洽验证**，文档必须与"权威第三方
+  实现字节级交叉验证"显式区分，不得混写
+- **detect**：probe 若比单帧握手重（如完整会话建立），给 _Profile.probe_budget 独立预算；
+  深读用规范强制节点（如 OPC UA Server_ServerArray ns=0;i=2254），不依赖厂商地址空间
+
 ## 验证清单
 
 - [ ] `pytest tests/ -q` 全绿

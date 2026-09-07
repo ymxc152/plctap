@@ -12,7 +12,7 @@
 
 ![demo](docs/demo.gif)
 
-**Status: v0.5.3 (automatic protocol detection + transparent proxy + fault-injection listener + seven protocol endpoints, six writable — IEC 104 is read-only; IEC 104 cross-validated against official lib60870, EtherNet/IP against pycomm3).**
+**Status: v0.6 (automatic protocol detection + transparent proxy + fault-injection listener + eight protocol endpoints incl. OPC UA (connection-level diagnostics), six writable — IEC 104 and OPC UA are read-only; IEC 104 cross-validated against official lib60870, EtherNet/IP against pycomm3).**
 
 ## Tools
 
@@ -20,7 +20,8 @@
 |---|---|---|
 | Connect | `detect_device` | **Automatic protocol detection**: concurrently probes standard ports for a given IP, identifies protocol/port/confidence from response fingerprints; deep mode performs a verification read and produces an executable `plc_read` suggestion; strictly read-only |
 | Connect | `probe_device` | Connectivity probe + four-class layered failure attribution (MELSEC supports 3E binary/ASCII automatic fallback; IEC 104 performs a STARTDT+TESTFR handshake probe) |
-| Connect | `plc_read` | Reads data areas and interprets by datatype/byte order (seven protocol endpoints: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip); with `datatype` omitted, returns multi-interpretations: uint16/int16/float32 in four byte orders (abcd/cdab/badc/dcba)/int32 |
+| Connect | `plc_read` | Reads data areas and interprets by datatype/byte order (eight protocol endpoints: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip / opcua); with `datatype` omitted, returns multi-interpretations: uint16/int16/float32 in four byte orders (abcd/cdab/badc/dcba)/int32 (opcua returns native UA types) |
+| Connect | `plc_browse` | Address-space browsing: expand one level of children from a node — map the device data structure before reading (OPC UA only; output budget 200 children, truncation carries total/shown counters) |
 | Diagnose | `parse_frame` / `validate_frame` | Structured single-frame parsing / conformance checklist |
 | Diagnose | `diagnose` | Rule engine + fault knowledge base → structured candidate report |
 | Diagnose | `parse_pcap` | Parses Wireshark-exported pcap, stream by stream and frame by frame (protocol identified independently per TCP stream; requires `uv sync --extra eval`) |
@@ -30,7 +31,7 @@
 
 ## Write capability
 
-With `PLCTAP_ALLOW_WRITE=true`, six of the seven endpoints are writable (modbus_rtu shares the modbus semantics; iec104 is read-only):
+With `PLCTAP_ALLOW_WRITE=true`, six of the eight endpoints are writable (modbus_rtu shares the modbus semantics; iec104 and opcua are read-only):
 
 | Protocol | Write semantics | options |
 |---|---|---|
@@ -44,7 +45,7 @@ Every write/send action is logged frame-by-frame to the audit log (recorded befo
 
 ## Protocol quick reference
 
-Addressing model and common options for the seven endpoints (also available at runtime via `list_protocols`):
+Addressing model and common options for the eight endpoints (also available at runtime via `list_protocols`):
 
 | Endpoint | Default port | Addressing | Common options |
 |---|---|---|---|
@@ -55,6 +56,7 @@ Addressing model and common options for the seven endpoints (also available at r
 | `s7` | 102 | **Byte** address, count=**bytes** | `options.area`: DB/M/I/Q (default DB); `options.db_number` (default 1); `rack`/`slot` (default 0/1, S7-300 slot usually 2) |
 | `iec104` | 2404 (2405 also common) | IOA information-object address, **interrogation-collected reads**, count=consecutive IOA points (M_ME_NC short float takes 2 words per point) | `options.ca`: common address (default 1); `options.qoi`: interrogation QOI (default 20, station interrogation) |
 | `enip` | 44818 (2222 also common; shares the port with MELSEC SLMP — detect tells them apart by response fingerprint) | **tag-name** string (e.g. "alpha[0]"), count=element count (array tags) | write: `options.type`: DINT (default) / REAL etc.; reads support dint / bool and other CIP types |
+| `opcua` | 4840 | **NodeId** string (e.g. "ns=2;i=5" / "ns=2;s=Demo.Double"), count=array-element cap (0=all); values returned in native UA types | SecurityPolicy None only (diagnostics); `plc_browse` from ns=0;i=85 to map the address space; **no frame-level diagnosis** (parse_frame/validate_frame reject explicitly) |
 
 `datatype` supports uint16 / int16 / float32 / int32; `byteorder` only affects the float32 register-pair order
 (big=ABCD, little=DCBA). With `datatype` omitted, the response carries interpretations for all common types ×
@@ -169,11 +171,13 @@ uv run plctap      # start the stdio server locally
 
 ## Quality assurance
 
-- **510 unit tests** (codec pure functions + adapters incl. Modbus RTU / IEC 104 / EtherNet/IP + diagnostics engine + listener + transparent proxy + detect_device), regressed by CI on every push.
+- **569 tests** (codec pure functions + adapters incl. Modbus RTU / IEC 104 / EtherNet/IP / OPC UA + diagnostics engine + listener + transparent proxy + detect_device + MCP smoke), regressed by CI on every push.
 - **Cross-vendor e2e** ([tests/e2e](tests/e2e/test_cross_vendor.py)): plctap cross-validated over real sockets against six authoritative third-party
   implementations — pymodbus, python-snap7, pymcprotocol, pypi fins, the official MZ Automation lib60870.NET, and pycomm3 (official Rockwell client library)
   (read/write closed loops, value-by-value read comparison, honeypot listener interop); runs in CI (`uv sync --group e2e`);
-  the IEC 104 cross-validation needs the .NET 8 SDK (skipped automatically when absent).
+  the IEC 104 cross-validation needs the .NET 8 SDK (skipped automatically when absent). The OPC UA endpoint is validated via the
+  official asyncua library against an in-process bench (self-consistency; session protocol with no frame-level diagnosis — deliberately
+  distinct from the byte-level cross-validation of the other endpoints).
 - **Eight-tier evaluation 49/49**: single frame / RTU integrity / batch logs / FINS·MELSEC specialty / active-probe attribution / automatic protocol detection / IEC 104 specialty / EtherNet/IP specialty
   (the detect tier includes two adversarial cases: "echo-server spoofing" and "evidence outweighing port priors"); dual-run comparison against the bare model follows.
 
@@ -195,7 +199,7 @@ temperature=0) answers directly; deterministic keyword scoring (fact-equivalence
 afterwards updated in 7608f47 along with the wire-format fixes, scoring semantics unchanged).
 **Scope note**: the corpus was built at milestone M2 (v0.2 era), covering frame parsing / CRC integrity /
 mixed logs / niche protocol semantics / active-probe attribution; v0.3+ features (plc_write / parse_pcap /
-transparent proxy / modbus_rtu endpoint / vendor_hints / iec104 endpoint / enip endpoint) are not in the
+transparent proxy / modbus_rtu endpoint / vendor_hints / iec104 endpoint / enip endpoint / opcua endpoint) are not in the
 baseline. The detect tier (4 cases, added in v0.4), the iec104 tier (6 cases, added in v0.5.2) and the enip
 tier (4 cases, added in v0.5.3) require live network services or benches and do not fit bare Q&A, so they are
 not in the comparison — tool mode totals 49/49 across eight tiers (re-run 2026-09-07 on the current corpus;

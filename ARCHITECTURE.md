@@ -1,6 +1,6 @@
 # plctap — Agent-PLC MCP Server 架构设计（ARCHITECTURE.md）
 
-> 配合 PLAN.md v5 与 BUILD.md 使用｜2026-09-03 初稿，2026-09-07 对齐 v0.5.5 七端点发布态
+> 配合 PLAN.md v5 与 BUILD.md 使用｜2026-09-03 初稿，2026-09-07 对齐 v0.6 八端点（含 OPC UA 连接级诊断）
 
 ## 1. 分层架构总览
 
@@ -11,7 +11,8 @@ MCP Server (FastMCP)
   ├─ 工具注册表（按配置条件注册，写工具默认缺席）
   ├─ 安全闸门 + 审计日志(JSONL)
   ├─ 连接管理器（连接池/空闲回收/目标级锁）
-  ├─ 协议适配器（插件式: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip 七端点）
+  ├─ 协议适配器（插件式: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip / opcua 八端点;
+  │   opcua 为会话式——asyncua 封装, 仅连接级诊断, 无 codec/帧级工具）
   ├─ 协议识别器 detect_device（_PROFILES 注册表: 扫端口 → 指纹 → 最小读验证, 全程只读）
   ├─ 主动诊断设施（透明代理 proxy.py / 钓鱼监听 listener.py, streams.py 分帧共用）
   ├─ Codec 纯函数层 (parse / validate / build)

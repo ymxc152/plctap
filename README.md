@@ -14,7 +14,7 @@
 
 ![demo](docs/demo.gif)
 
-**状态: v0.5.3 (协议自动识别 + 透明代理 + 故障注入监听 + 七协议端点接入, 六端点可写 (IEC 104 仅读); IEC 104 经 lib60870、EtherNet/IP 经 pycomm3 官方实现交叉验证)。**
+**状态: v0.6 (协议自动识别 + 透明代理 + 故障注入监听 + 八协议端点接入 (含 OPC UA 连接级诊断), 六端点可写 (IEC 104 / OPC UA 仅读); IEC 104 经 lib60870、EtherNet/IP 经 pycomm3 官方实现交叉验证, OPC UA 为 asyncua 官方库台架自洽验证)。**
 
 ## 工具
 
@@ -22,7 +22,8 @@
 |---|---|---|
 | 连接 | `detect_device` | **协议自动识别**: 给 IP 并发探测标准端口, 按响应指纹判定协议/端口/置信度, deep 模式验证读并生成可执行的 plc_read 建议; 全程只读 |
 | 连接 | `probe_device` | 连通性探测 + 四类失败分层归因 (MELSEC 支持 3E binary/ASCII 自动回退; IEC 104 为 STARTDT+TESTFR 握手探测) |
-| 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (七个协议端点: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip); datatype 缺省返回 uint16/int16/float32 四种字序 (abcd/cdab/badc/dcba)/int32 多解释 |
+| 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (八个协议端点: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip / opcua); datatype 缺省返回 uint16/int16/float32 四种字序 (abcd/cdab/badc/dcba)/int32 多解释 (opcua 返回 UA 原生类型) |
+| 连接 | `plc_browse` | 地址空间浏览: 从 node 展开一层子节点, 摸清设备数据结构后再读 (仅 OPC UA; 输出预算 200 子节点, 截断带 total/shown 计数) |
 | 诊断 | `parse_frame` / `validate_frame` | 单帧结构化解析 / 规范校验清单 |
 | 诊断 | `diagnose` | 规则引擎 + 故障知识库 → 结构化候选报告 |
 | 诊断 | `parse_pcap` | 解析 Wireshark 导出 pcap, 逐流逐帧 (每条 TCP 流独立判别协议, 需 `uv sync --extra eval`) |
@@ -32,7 +33,7 @@
 
 ## 写能力
 
-`PLCTAP_ALLOW_WRITE=true` 后七端点中六个可写 (modbus_rtu 与 modbus 同轨同语义; iec104 仅读):
+`PLCTAP_ALLOW_WRITE=true` 后八端点中六个可写 (modbus_rtu 与 modbus 同轨同语义; iec104 与 opcua 仅读):
 
 | 协议 | 写语义 | options |
 |---|---|---|
@@ -46,7 +47,7 @@
 
 ## 协议速查
 
-七个端点的寻址模型与常用参数 (接入前先对表; 工具内 `list_protocols` 亦可动态获取):
+八个端点的寻址模型与常用参数 (接入前先对表; 工具内 `list_protocols` 亦可动态获取):
 
 | 端点 | 默认端口 | 地址语义 | 常用 options |
 |---|---|---|---|
@@ -57,6 +58,7 @@
 | `s7` | 102 | **字节**地址, count=**字节数** | `options.area`: DB/M/I/Q (默认 DB); `options.db_number` (默认 1); `rack`/`slot` (默认 0/1, S7-300 槽位通常 2) |
 | `iec104` | 2404 (2405 亦常见) | IOA 信息对象地址, **总召收集式读**, count=连续 IOA 点数 (M_ME_NC 短浮点每点占 2 个 16 位字) | `options.ca`: 公共地址 (默认 1); `options.qoi`: 总召 QOI (默认 20 站总召) |
 | `enip` | 44818 (2222 亦常见; 与 MELSEC SLMP 同端口, detect 按响应指纹区分) | **tag 名**字符串 (如 "alpha[0]"), count=元素个数 (数组 tag) | 写: `options.type`: DINT (默认) / REAL 等; 读支持 dint / bool 等 CIP 类型 |
+| `opcua` | 4840 | **NodeId** 字符串 (如 "ns=2;i=5" / "ns=2;s=Demo.Double"), count=数组节点返回元素上限 (0=全部); 值按 UA 内建类型原生返回 | 仅 SecurityPolicy None (诊断场景); `plc_browse` 从 ns=0;i=85 摸地址空间; **不做帧级诊断** (parse_frame/validate_frame 显式拒绝) |
 
 `datatype` 支持 uint16 / int16 / float32 / int32; `byteorder` 仅影响 float32 的寄存器对顺序
 (big=ABCD, little=DCBA)。datatype 缺省时返回全部常见类型 × 字序的多解释, 字序存疑时直接比对。
@@ -166,11 +168,12 @@ uv run plctap      # 本地启动 stdio server
 
 ## 质量保障
 
-- **510 项单测**（codec 纯函数 + 适配器（含 Modbus RTU / IEC 104 / EtherNet/IP）+ 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
+- **569 项测试**（codec 纯函数 + 适配器（含 Modbus RTU / IEC 104 / EtherNet/IP / OPC UA）+ 诊断引擎 + 监听器 + 透明代理 + detect_device + MCP 冒烟），CI 每次推送回归。
 - **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
   pymcprotocol、pypi fins、MZ Automation 官方 lib60870.NET、pycomm3（Rockwell 官方客户端库）六个第三方权威实现做真实 socket 交叉验证
   （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）；
-  IEC 104 交叉验证需 .NET 8 SDK（缺省自动跳过）。
+  IEC 104 交叉验证需 .NET 8 SDK（缺省自动跳过）。OPC UA 端点为 asyncua 官方库 +
+  台架自洽验证（会话协议无帧级诊断，与本节其余端点的字节级交叉验证口径不同，如实区分）。
 - **八档评测 49/49**：单帧 / RTU 完整性 / 批量日志 / FINS·MELSEC 专项 / 主动探测归因 / 协议自动识别 /
   IEC 104 专项 / EtherNet/IP 专项
   （detect 档含"回显服务器欺骗"与"证据压过端口先验"两类反例）；与裸模型的双跑对比见下节。
@@ -192,7 +195,7 @@ uv run plctap      # 本地启动 stdio server
 fins 语料其后于 7608f47 随线上格式修正同步更新, 判分语义不变)。
 **范围说明**: 语料建于 M2 (v0.2 时代), 覆盖帧解析 / CRC 完整性 / 日志混排 / 冷门协议语义 /
 主动探测归因; v0.3+ 功能 (plc_write / parse_pcap / 透明代理 / modbus_rtu 端点 / vendor_hints /
-iec104 端点 / enip 端点) 未纳入基线。detect 档 (4 用例, v0.4 新增)、iec104 档 (6 用例, v0.5.2
+iec104 端点 / enip 端点 / opcua 端点) 未纳入基线。detect 档 (4 用例, v0.4 新增)、iec104 档 (6 用例, v0.5.2
 新增) 与 enip 档 (4 用例, v0.5.3 新增) 需起真实网络服务/台架做主动探测与交互, 不适合裸问答
 形式, 故未纳入对比 —— 工具模式八档合计 49/49 (2026-09-07 按当前语料复跑, 见「质量保障」)。
 结论: 单帧翻译裸模型已能胜任, **价值差距集中在冷门协议语义与多故障混排场景** ——

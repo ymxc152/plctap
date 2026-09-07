@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ymxc152/plctap",
   "title": "plctap",
-  "description": "Agent-PLC MCP Server: read & diagnose Modbus / FINS / MELSEC / S7 / IEC 104 / EtherNet/IP PLCs.",
+  "description": "Agent-PLC MCP Server: read & diagnose Modbus / FINS / MELSEC / S7 / IEC 104 / ENIP / OPC UA PLCs.",
   "repository": {
     "url": "https://github.com/ymxc152/plctap",
     "source": "github"
