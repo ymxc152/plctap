@@ -1,0 +1,48 @@
+# IEC 60870-5-104 专项语料 (v0.5.2 第六档)
+# 帧全部由本仓库 codec 构造 (红线 1); 总召帧与 lib60870 官方实现逐字节比对一致
+# expect 判分语义与 modbus_m2.yaml 相同 (no_candidates / 关键词事实等价集)
+- id: iec104_startdt_act_ok
+  tier: iec104
+  protocol: iec104
+  input: { frame_hex: "680407000000" }
+  expect:
+    valid: true
+    no_candidates: true
+- id: iec104_interrogation_act_ok
+  tier: iec104
+  protocol: iec104
+  # 总召 C_IC_NA_1 ACT (QOI=20), 与 lib60870 官方实现逐字节一致
+  input: { frame_hex: "680e0000000064010600010000000014" }
+  expect:
+    valid: true
+    no_candidates: true
+- id: iec104_bad_start_byte
+  tier: iec104
+  protocol: iec104
+  input: { frame_hex: "580407000000" }
+  expect:
+    symptom_keywords: ["启动字符", "0x68", "不是 IEC 104"]
+    cause_keywords: ["端口上不是 IEC 104 服务", "其他协议"]
+- id: iec104_apdu_length_overflow
+  tier: iec104
+  protocol: iec104
+  input: { frame_hex: "68ff0700000000000000000000000000" }
+  expect:
+    symptom_keywords: ["APDU 长度", "越界", "不自洽"]
+    cause_keywords: ["失步", "非 104 流量", "中间设备改写"]
+- id: iec104_unknown_type_id
+  tier: iec104
+  protocol: iec104
+  # 类型标识 0xEE 未收录 (合法 I 帧骨架, 类型字节替换)
+  input: { frame_hex: "680e00000100ee010600010000000014" }
+  expect:
+    symptom_keywords: ["类型标识", "未收录"]
+    cause_keywords: ["私有类型", "帧错位"]
+- id: iec104_monitor_sp_ok
+  tier: iec104
+  protocol: iec104
+  # M_SP_NA_1 单点遥信自发帧 (IOA=200, 值 1, COT=3 自发)
+  input: { frame_hex: "680e04000100010103000100c8000001" }
+  expect:
+    valid: true
+    no_candidates: true

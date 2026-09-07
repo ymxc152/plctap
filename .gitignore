@@ -27,6 +27,10 @@ issue-evidence/
 eval/prompts.jsonl
 eval/results_baseline.json
 
+# C# 台架编译产物 (tests/e2e/bench_iec104, dotnet build 可再生)
+tests/e2e/bench_*/bin/
+tests/e2e/bench_*/obj/
+
 # 验证工具链 (便携 JDK / 第三方模拟器源码, 体积大且可再生)
 tools/
 scripts/*.log

@@ -41,11 +41,12 @@ uv run python eval/baseline.py --answers answers.jsonl
 - 6 例端点超时计 FAIL (披露于 README); 判分关键词为事实等价集 (| 语法),
   benchmark/baseline 两处实现已同步
 - fins 语料其后于 7608f47 (v0.2.0) 随 MELSEC 线上格式修正同步更新 (帧输入与判分
-  关键词, 判分语义不变); 工具模式 2026-09-07 按当前语料复跑 39/39
-- v0.4 (2026-09-07): 新增 detect 档 4 例 (`corpus/detect.yaml`, 进程内假设备),
-  工具模式六档合计 39/39; detect 档需起真实网络服务做主动探测, 无裸问答基线
+  关键词, 判分语义不变); 工具模式 2026-09-07 按当前语料复跑
+- v0.4 (2026-09-07): 新增 detect 档 4 例 (`corpus/detect.yaml`, 进程内假设备);
+  v0.5.2: 新增 iec104 档 6 例 (`corpus/iec104.yaml`, 总召帧与 lib60870 官方实现
+  逐字节比对) —— 两档均需真实网络服务/台架, 无裸问答基线, 工具模式七档合计 45/45
 - **范围**: 语料建于 M2 (v0.2 时代); v0.3+ 功能 (plc_write / parse_pcap /
-  透明代理 / modbus_rtu 端点 / vendor_hints) 未纳入基线
+  透明代理 / modbus_rtu 端点 / vendor_hints / iec104 端点) 未纳入基线
 - `results_baseline.json` 为生成物 (已 gitignore, 可按上文步骤再生);
   README 对比表数字以本节为准
 

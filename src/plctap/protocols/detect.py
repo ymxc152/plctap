@@ -21,7 +21,7 @@ from plctap.conn.manager import ConnectionPool
 from plctap.models import ProbeResult, ReadResult, Target
 from plctap.protocols.base import ProtocolAdapter, adapter_for, known_protocols
 
-DEFAULT_SCAN_PORTS = [102, 502, 2000, 44818, 5007, 6000, 9600, 9601]
+DEFAULT_SCAN_PORTS = [102, 502, 2000, 2404, 44818, 5007, 6000, 9600, 9601]
 
 # 端口先验: 仅用于同级候选排序 (先验匹配端口优先), 不参与置信度评分。
 # 44818 是 EtherNet/IP 规范端口, 与本仓库 melsec 的 default_port 撞号 ——
@@ -30,6 +30,7 @@ DEFAULT_SCAN_PORTS = [102, 502, 2000, 44818, 5007, 6000, 9600, 9601]
 # 网关 RTU 模式靠 probe 指纹区分 (TCP 探测在 RTU 设备上落 connected_but_no_reply)。
 PORT_PRIORS: dict[int, str | None] = {
     102: "s7",
+    2404: "iec104",
     502: "modbus",
     2000: "melsec",
     44818: None,
@@ -77,6 +78,11 @@ async def _deep_read_melsec(ad: ProtocolAdapter, t: Target) -> ReadResult:
     return await ad.read(t, address=0, count=2, device="D")
 
 
+async def _deep_read_iec104(ad: ProtocolAdapter, t: Target) -> ReadResult:
+    """最小读: 总召收集 IOA 0..0 (1 点)。"""
+    return await ad.read(t, address=0, count=1, ca=1)
+
+
 @dataclass(frozen=True)
 class _Profile:
     """单协议识别配置 (注册表条目): 证据文案 + 深读参数 + next_step 模板。
@@ -100,6 +106,15 @@ _PROFILES: dict[str, _Profile] = {
         ),
         deep_read=_deep_read_modbus,
         next_step="plc_read(protocol='modbus', host='{host}', port={port}, address=0, count=10)",
+    ),
+    "iec104": _Profile(
+        evidence="APCI 握手自洽 (STARTDT_ACT -> STARTDT_CON, TESTFR 闭环)",
+        exception_evidence=None,
+        deep_read=_deep_read_iec104,
+        next_step=(
+            "plc_read(protocol='iec104', host='{host}', port={port}, address=0, "
+            "count=10, options={{'ca': 1}})"
+        ),
     ),
     "modbus_rtu": _Profile(
         evidence="RTU 帧 CRC 自洽且功能码回显 (无 MBAP, addr+PDU+CRC16) — 网关/串口服务器 RTU 模式",

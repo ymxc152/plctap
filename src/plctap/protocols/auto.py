@@ -20,7 +20,33 @@ def parse_auto(protocol: str, frame: bytes) -> ParseResult:
         return _parse_fins(frame)
     if protocol == "melsec":
         return _parse_melsec(frame)
+    if protocol == "iec104":
+        return _parse_iec104(frame)
     raise ValueError(f"parse_frame not implemented for {protocol!r} yet")
+
+
+def _parse_iec104(frame: bytes) -> ParseResult:
+    """auto 规则: 帧型由控制域客观判定 (I/S/U), 方向仅在 I 格式内细分。
+
+    I 格式: 控制方向类型 (命令 45-48/系统 100-107) -> req; 监视方向
+    类型 (遥信遥测) -> resp。U/S 格式: 主站主动发起的 ACT/确认 -> req,
+    设备回的 CON -> resp (按 U 功能码判断: _CON 结尾视为 resp)。
+    """
+    from plctap.protocols.iec104 import codec
+
+    parsed = codec.parse_frame(frame)
+    if parsed.direction != "auto" or len(frame) < 6:
+        return parsed
+    fmt = codec.apci_format(frame[2:6])
+    if fmt == "U":
+        parsed.direction = "resp" if frame[2] in (codec.U_STARTDT_CON, codec.U_STOPDT_CON,
+                                                  codec.U_TESTFR_CON) else "req"
+    elif fmt == "S":
+        parsed.direction = "req"
+    else:
+        # I 格式: parse_frame 已按 type_id 判过; 控制方向类型再兜底
+        return parsed
+    return parsed
 
 
 def _parse_modbus(frame: bytes) -> ParseResult:
