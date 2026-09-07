@@ -32,6 +32,9 @@ probe_device / detect_device 输出为固定形状小对象 (字段数固定, id
 - list_protocols      <=   8KB   实测 3.4KB: 每协议 ~400B, 8KB 容得下协议数翻倍。
 - plc_read (形状)     <=  16KB   形状实测 2.3KB: modbus 合法满读 125 寄存器 +
                                  interpret_all 多解释 dict, 随 count 线性放大。
+- plc_browse          <=  32KB   硬上限 200 子节点 (opcua adapter
+                                 _BROWSE_MAX_CHILDREN), 实测 ~17KB; 断言在
+                                 test_adapter_opcua.py (需 asyncua 台架)。
 """
 
 from __future__ import annotations

@@ -30,13 +30,28 @@ def test_kb_entry_shape(entry):
     c = entry["candidate"]
     assert c["symptom"] and c["root_cause"] and c["suggested_action"]
     assert 0 < c["confidence"] <= 1
-    assert entry["protocol"] in ("modbus", "modbus_rtu", "fins", "melsec", "s7", "iec104", "enip", "any")
+    assert entry["protocol"] in ("modbus", "modbus_rtu", "fins", "melsec", "s7", "iec104", "enip", "opcua", "any")
     m = entry.get("match", {})
     assert isinstance(m, dict)
     if "failure_class" in m:
         assert set(m["failure_class"]) <= {
             "connection_refused", "timeout", "connected_but_no_reply", "exception_response"
         }
+
+
+# ---------------------------------------------------------------- 协议域过滤 (v0.6)
+
+
+def test_kb_protocol_scoped_entries():
+    """协议专属条目只对该协议生效 (opcua probe 条目是首个协议域 probe 条目)。"""
+    probe = ProbeResult(reachable=False, failure_class="connected_but_no_reply")
+    opcua_hits = {c.symptom for c in diagnose("opcua", probe_result=probe).candidates}
+    melsec_hits = {c.symptom for c in diagnose("melsec", probe_result=probe).candidates}
+    assert any("UA 会话未建立" in s for s in opcua_hits)  # kb/opcua.yaml 命中
+    assert not any("UA 会话未建立" in s for s in melsec_hits)  # 不泄漏到其他协议
+    # 通用条目 (protocol: any) 双侧都命中
+    assert any("TCP 建立成功但协议层不应答" in s for s in opcua_hits)
+    assert any("TCP 建立成功但协议层不应答" in s for s in melsec_hits)
 
 
 # ---------------------------------------------------------------- Modbus
