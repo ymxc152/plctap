@@ -5,6 +5,11 @@
 > Agent 的 PLC 驱动层 — 让 Claude / Codex / Cursor 直接连接、读写、诊断
 > Modbus TCP / FINS / MELSEC / Siemens S7comm PLC 的 MCP Server。
 
+![CI](https://github.com/ymxc152/plctap/actions/workflows/ci.yml/badge.svg)
+[![PyPI](https://img.shields.io/pypi/v/plctap)](https://pypi.org/project/plctap/)
+[![MCP Registry](https://img.shields.io/badge/MCP_Registry-io.github.ymxc152%2Fplctap-blue)](https://registry.modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 ![demo](docs/demo.gif)
 
 **状态: v0.4.0 (协议自动识别 + 透明代理 + 故障注入监听 + 四协议读写 + 跨厂商 e2e)。**
@@ -45,7 +50,7 @@
 - **六档评测 39/39**：单帧 / RTU 完整性 / 批量日志 / FINS·MELSEC 专项 / 主动探测归因 / 协议自动识别
   （detect 档含"回显服务器欺骗"与"证据压过端口先验"两类反例）。
 
-## 评测对比 (五档, 35 用例)
+## 评测对比 (裸模型基线双跑: 五档 35 用例)
 
 | 档位 | plctap 工具链 | 裸模型直接问答* |
 |---|---|---|
@@ -61,12 +66,18 @@
 (排除超时后 24/29 = 82.8%)。跑分日期 2026-09-04, 语料版本见 git。
 结论: 单帧翻译裸模型已能胜任, **价值差距集中在冷门协议语义与多故障混排场景** ——
 这正是确定性解析 + 结构化知识库的所在。
+上表为可双跑的五档基线对比; detect 档 (协议自动识别, 4 用例, v0.4 新增) 需要起
+真实网络服务做主动探测, 不适合裸问答形式, 故未纳入基线 —— 工具模式六档合计
+39/39 (见「质量保障」)。
 
 ## 快速开始
 
 ```bash
 uvx plctap          # 或 pipx install plctap
 ```
+
+已收录于 MCP 官方 Registry: [`io.github.ymxc152/plctap`](https://registry.modelcontextprotocol.io/)
+(支持按名称检索与安装的客户端可直接发现本服务)。
 
 ### Claude Desktop 接入 (`claude_desktop_config.json`)
 
@@ -115,6 +126,7 @@ PLCTAP_DEFAULT_TIMEOUT_MS = "2000"
 | `PLCTAP_POOL_MAX_PER_TARGET` | `2` | 每目标连接池上限 |
 | `PLCTAP_IDLE_TIMEOUT_SEC` | `30` | 空闲连接回收秒数 |
 | `PLCTAP_DEFAULT_TIMEOUT_MS` | `2000` | 网络超时 |
+| `PLCTAP_AUDIT_LOG` | `~/.plctap/audit.jsonl` | 审计日志路径 (写/发送动作逐帧留痕) |
 
 ## 安全
 

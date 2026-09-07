@@ -10,7 +10,8 @@
   GitHub 建仓  +  PyPI 建项目并开 trusted publishing  +  收录站注册账号
 
 每次发版 (5 分钟):
-  bump version -> uv build 本地自检 -> git tag vX.Y.Z -> push -> CI 自动发 PyPI
+  bump pyproject version -> uv build 本地自检 -> git tag vX.Y.Z -> push
+  -> CI 自动: 发 PyPI + 收录 MCP 官方 Registry (server.json 版本由 CI 对齐 tag)
 ```
 
 ## 阶段 0: 一次性前置
@@ -29,8 +30,11 @@
   一次性设置: PyPI 项目 Settings → "Publishing" → 填 `GitHub` / 你的仓库 / `publish` (workflow 文件名)
 - 备选: 本地 `uvx twine upload` (需要 `PYPI_TOKEN`, 每次发版手动跑)
 
-### 0.3 MCP 收录站账号 (最后做也行)
-glama.ai / mcp.so / Pulse (npm 的 mcp-registry) 各注册一个账号。
+### 0.3 MCP 官方 Registry (零前置) + 聚合收录站
+- 官方 Registry (registry.modelcontextprotocol.io): **不用注册账号、无任何前置**。
+  server.json 的 name `io.github.ymxc152/plctap` 就是 GitHub 身份声明, CI 里
+  `mcp-publisher login github-oidc` 用 Actions OIDC 换凭证发布 (与 PyPI 一样无密钥)。
+- 聚合收录站 (最后做也行): glama.ai / mcp.so / Pulse 各注册一个账号。
 
 ## 阶段 1: 每次发版 (固定动作)
 
@@ -40,10 +44,11 @@ glama.ai / mcp.so / Pulse (npm 的 mcp-registry) 各注册一个账号。
 uv build
 uv run python -m pytest -q          # 全量测试
 uvx --from . plctap                  # 控制台入口能启动 (stdio 挂起=正常)
-# 3) 提交 + 打标签 + 推送
+# 3) 提交 + 打标签 + 推送 (server.json 不用手动 bump, CI 自动对齐 tag)
 git add pyproject.toml && git commit -m "release: vX.Y.Z"
 git tag vX.Y.Z && git push origin main --tags
-# 4) CI 自动: 构建 -> publish workflow 上传 PyPI (OIDC, 无密钥)
+# 4) CI 自动: 版本一致性校验 -> 构建 -> 上传 PyPI (OIDC, 无密钥)
+#            -> 等 PyPI 索引生效 -> mcp-publisher publish server.json 收录官方 Registry
 # 5) 验收
 uvx plctap                           # 任意机器一行装起来
 ```
@@ -65,15 +70,15 @@ cp skill/SKILL.md ~/.claude/skills/
 README 里补一句即可。若以后想在 `uvx` 后一行装 skill, 再加一个
 `plctap install-skill` 子命令 (M4 范围)。
 
-## 阶段 2: 补全内容 (需你的环境)
+## 阶段 2: 已结项 (2026-09-07)
 
-- [ ] 三端接入截图 (Claude Desktop / Codex / Cursor), 替换 README 占位
-- [ ] 五档评测对比表: `eval/benchmark.py` 工具模式已 18/18; 裸模型基线
-      `uv run python eval/baseline.py --run` (需 `OPENAI_API_KEY`), 出对比表
-- [ ] README 首屏加 CI 徽章 (仓库公开后): `![CI](https://github.com/ymxc152/plctap/actions/workflows/ci.yml/badge.svg)`
+- [x] 裸模型基线双跑完成, 五档对比表已进 README (工具 35/35 vs 裸模型 24/35; v0.4 起工具模式六档 39/39)
+- [x] README 首屏徽章已加 (CI + PyPI 版本 + MCP Registry + License)
+- [x] ~~三端接入截图~~ 取消: 接入配置样例已足够说明, 不再需要截图
 
 ## 阶段 3: MCP 收录站提交 (每个站一条)
 
+- 官方 Registry 已由 CI 在每次打 tag 时自动发布, 无需手动提交; 本阶段只剩聚合收录站
 - 提交内容: 名称 `plctap` / 一句话描述 / 服务器 URL (npm 的填 `plctap`)
 - 描述建议: `Agent-PLC MCP server: probe, read, write and diagnose Modbus TCP / FINS / MELSEC PLCs`
 - 三个站各自"提交"表单, 填完等收录 (一般 1-3 个工作日)
