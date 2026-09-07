@@ -44,7 +44,7 @@ Every write/send action is logged frame-by-frame to the audit log (recorded befo
 
 ## Quality assurance
 
-- **508 unit tests** (codec pure functions + adapters incl. Modbus RTU / IEC 104 / EtherNet/IP + diagnostics engine + listener + transparent proxy + detect_device), regressed by CI on every push.
+- **510 unit tests** (codec pure functions + adapters incl. Modbus RTU / IEC 104 / EtherNet/IP + diagnostics engine + listener + transparent proxy + detect_device), regressed by CI on every push.
 - **Cross-vendor e2e** ([tests/e2e](tests/e2e/test_cross_vendor.py)): plctap cross-validated over real sockets against six authoritative third-party
   implementations — pymodbus, python-snap7, pymcprotocol, pypi fins, the official MZ Automation lib60870.NET, and pycomm3 (official Rockwell client library)
   (read/write closed loops, value-by-value read comparison, honeypot listener interop); runs in CI (`uv sync --group e2e`);

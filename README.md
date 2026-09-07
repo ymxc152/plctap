@@ -46,7 +46,7 @@
 
 ## 质量保障
 
-- **508 项单测**（codec 纯函数 + 适配器（含 Modbus RTU / IEC 104 / EtherNet/IP）+ 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
+- **510 项单测**（codec 纯函数 + 适配器（含 Modbus RTU / IEC 104 / EtherNet/IP）+ 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
 - **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
   pymcprotocol、pypi fins、MZ Automation 官方 lib60870.NET、pycomm3（Rockwell 官方客户端库）六个第三方权威实现做真实 socket 交叉验证
   （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）；
