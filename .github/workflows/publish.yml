@@ -1,15 +1,16 @@
-name: Publish to PyPI
+name: Publish to PyPI & MCP Registry
 
 # 打 v* 标签即触发: git tag v0.1.0 && git push origin v0.1.0
-# 用 PyPI Trusted Publishing (OIDC), GitHub Actions 内不需要任何 token/密码;
-# 前置一次性设置: PyPI 项目设置里启用 trusted publishing (见 docs/PUBLISH.md)
+# 两个发布均走 OIDC (GitHub Actions 内不需要任何 token/密码):
+#   1. PyPI Trusted Publishing   — 前置一次性设置见 docs/PUBLISH.md 阶段 0.2
+#   2. MCP Registry 收录 server.json — 无需注册账号, GitHub 身份即凭证 (阶段 0.3)
 
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  id-token: write  # OIDC 签发发布凭证
+  id-token: write  # OIDC 签发发布凭证 (PyPI 与 MCP Registry 共用)
 
 jobs:
   publish:
@@ -19,5 +20,45 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
+      - name: 校验 pyproject 版本与 tag 一致
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PYPROJECT_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "::error::tag ($TAG_VERSION) 与 pyproject.toml version ($PYPROJECT_VERSION) 不一致"
+            exit 1
+          fi
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # MCP Registry 收录: server.json 里引用的 pypi 包版本会被 registry 校验真实存在,
+  # 因此必须等 publish (PyPI) 成功后再发, 且要等 PyPI 索引对 CDN 生效。
+  mcp-registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: server.json 版本对齐 tag (两级 version 一并改)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v | .packages[].version = $v' server.json > server.tmp && mv server.tmp server.json
+      - name: 等待 PyPI 索引生效 (最多 5 分钟)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            if curl -fsSL "https://pypi.org/pypi/plctap/$VERSION/json" > /dev/null 2>&1; then
+              echo "plctap==$VERSION 已在 PyPI 可见"
+              exit 0
+            fi
+            echo "等待中... ($i/30)"
+            sleep 10
+          done
+          echo "::error::5 分钟内 PyPI 未出现 plctap==$VERSION"
+          exit 1
+      - name: Login (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish server.json
+        run: ./mcp-publisher publish server.json
