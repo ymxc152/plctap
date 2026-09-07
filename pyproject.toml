@@ -1,6 +1,6 @@
 [project]
 name = "plctap"
-version = "0.5.3"
+version = "0.5.4"
 description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 / IEC 60870-5-104 / EtherNet/IP PLCs"
 readme = "README.md"
 license = "MIT"

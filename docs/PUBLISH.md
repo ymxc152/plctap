@@ -48,6 +48,8 @@
 ```bash
 # 1) bump 版本 (0.x 阶段手动编辑 pyproject.toml 的 version; 不用 sed 模式替换
 #    —— v0.5.2 曾因 sed 模式未匹配 0.5.1 导致 tag 校验失败、删 tag 重打)
+#    前提: 待发布提交必须先推分支过 CI, 且 tag 所在提交要包含最新 publish.yml
+#    —— v0.5.3 曾从含旧版 workflow 的线上打 tag, 绕过了 guard-main 闸门
 # 2) 本地自检: 构建 + 冒烟
 uv build
 uv run python -m pytest -q          # 全量测试
