@@ -1,7 +1,7 @@
 [project]
 name = "plctap"
 version = "0.5.2"
-description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 PLCs"
+description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 / IEC 60870-5-104 PLCs"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
