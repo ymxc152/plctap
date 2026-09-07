@@ -10,9 +10,13 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "要收录的 tag (vX.Y.Z 形式)"
+        description: "要收录的版本 (vX.Y.Z 形式, PyPI 上必须已存在)"
         required: true
         default: "v0.5.1"
+      checkout_ref:
+        description: "检出 ref (默认同 ref; server.json 在 tag 之后才修正时填 main 等分支)"
+        required: false
+        default: ""
 
 permissions:
   id-token: write  # OIDC 签发发布凭证
@@ -23,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.checkout_ref || inputs.ref }}
       - name: Install mcp-publisher
         run: |
           curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
