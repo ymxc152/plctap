@@ -12,7 +12,7 @@
 
 ![demo](docs/demo.gif)
 
-**Status: v0.5.3 (automatic protocol detection + transparent proxy + fault-injection listener + read/write across seven protocol endpoints; IEC 104 cross-validated against official lib60870, EtherNet/IP against pycomm3).**
+**Status: v0.5.3 (automatic protocol detection + transparent proxy + fault-injection listener + seven protocol endpoints, six writable — IEC 104 is read-only; IEC 104 cross-validated against official lib60870, EtherNet/IP against pycomm3).**
 
 ## Tools
 
@@ -24,13 +24,13 @@
 | Diagnose | `parse_frame` / `validate_frame` | Structured single-frame parsing / conformance checklist |
 | Diagnose | `diagnose` | Rule engine + fault knowledge base → structured candidate report |
 | Diagnose | `parse_pcap` | Parses Wireshark-exported pcap, stream by stream and frame by frame (protocol identified independently per TCP stream; requires `uv sync --extra eval`) |
-| Listen | `start_listener` / `stop_listener` / `get_listener_frames` | Honeypot mode: when the device can only act as a client, stand up a fake server to capture frames for analysis (three modes: record_only / respond_normal / inject_errors rotating fault injection; MELSEC responses support all 4 frame formats) |
+| Listen | `start_listener` / `stop_listener` / `get_listener_frames` | Honeypot mode: when the device can only act as a client, stand up a fake server to capture frames for analysis (three modes: record_only / respond_normal / inject_errors rotating fault injection; MELSEC responses support all 4 frame formats; IEC 104 answers STARTDT/TESTFR CON and canned interrogation frames) |
 | Listen | `start_proxy` / `stop_proxy` / `get_proxy_frames` | Transparent proxy: host app → proxy → real PLC; forwards while framing and recording both directions — online debugging without Wireshark (modbus/fins/melsec) |
 | Execute | `plc_write` / `send_frame` | **Not registered by default**; enabled only with `PLCTAP_ALLOW_WRITE=true` (safety gate) |
 
 ## Write capability
 
-With `PLCTAP_ALLOW_WRITE=true`, all four protocols:
+With `PLCTAP_ALLOW_WRITE=true`, six of the seven endpoints are writable (modbus_rtu shares the modbus semantics; iec104 is read-only):
 
 | Protocol | Write semantics | options |
 |---|---|---|
@@ -38,16 +38,18 @@ With `PLCTAP_ALLOW_WRITE=true`, all four protocols:
 | S7 | 16-bit word writes to DB/M/I/Q areas | `options.area`, `options.db_number` |
 | FINS | 0102 area word writes (CIO/W/H/A/DM/EM) | `options.area` |
 | MELSEC | 1401 batch word writes, all 4 frame formats | `options.device`, `options.frame_format` |
+| EtherNet/IP | CIP tag write (0x4D); integers default DINT, floats need explicit `options.type="REAL"` | `point_type="tag"`, `options.type` |
 
 Every write/send action is logged frame-by-frame to the audit log (recorded before sending; failures are recorded too).
 
 ## Quality assurance
 
-- **461 unit tests** (codec pure functions + adapters incl. Modbus RTU + diagnostics engine + listener + transparent proxy + detect_device), regressed by CI on every push.
-- **Cross-vendor e2e** ([tests/e2e](tests/e2e/test_cross_vendor.py)): plctap cross-validated over real sockets against four authoritative third-party
-  implementations — pymodbus, python-snap7, pymcprotocol, and pypi fins
-  (read/write closed loops, value-by-value read comparison, honeypot listener interop); runs in CI (`uv sync --group e2e`).
-- **Six-tier evaluation 39/39**: single frame / RTU integrity / batch logs / FINS·MELSEC specialty / active-probe attribution / automatic protocol detection
+- **508 unit tests** (codec pure functions + adapters incl. Modbus RTU / IEC 104 / EtherNet/IP + diagnostics engine + listener + transparent proxy + detect_device), regressed by CI on every push.
+- **Cross-vendor e2e** ([tests/e2e](tests/e2e/test_cross_vendor.py)): plctap cross-validated over real sockets against six authoritative third-party
+  implementations — pymodbus, python-snap7, pymcprotocol, pypi fins, the official MZ Automation lib60870.NET, and pycomm3 (official Rockwell client library)
+  (read/write closed loops, value-by-value read comparison, honeypot listener interop); runs in CI (`uv sync --group e2e`);
+  the IEC 104 cross-validation needs the .NET 8 SDK (skipped automatically when absent).
+- **Eight-tier evaluation 49/49**: single frame / RTU integrity / batch logs / FINS·MELSEC specialty / active-probe attribution / automatic protocol detection / IEC 104 specialty / EtherNet/IP specialty
   (the detect tier includes two adversarial cases: "echo-server spoofing" and "evidence outweighing port priors").
 
 ## Evaluation vs. bare-LLM baseline (dual run: five tiers, 35 cases)
@@ -56,20 +58,25 @@ Every write/send action is logged frame-by-frame to the audit log (recorded befo
 |---|---|---|
 | Single-frame Modbus TCP | 8/8 | 8/8 |
 | RTU integrity/CRC | 5/5 | 4/5 |
-| Batch logs (mixed) | 5/5 | 4/5 |
+| Batch logs (mixed) | 5/5 | 3/5 |
 | FINS/MELSEC specialty | 12/12 | 5/12 |
-| Active-probe attribution | 5/5 | 5/5 |
+| Active-probe attribution | 5/5 | 4/5 |
 | **Total** | **35/35 (100%)** | **24/35 (68.6%)** |
 
-\* Baseline method: the same corpus answered directly by the bare model (glm-5.3-flash, no tools, temperature=0);
+\* The same corpus answered by the bare model (glm-5.3-flash, no tools, temperature=0);
 deterministic keyword scoring (fact-equivalence sets, shared by both modes); 6 cases got no valid answer due to
-inference-endpoint timeouts and count as FAIL (excluding timeouts: 24/29 = 82.8%). Run date 2026-09-04; corpus
-version in git.
+inference-endpoint timeouts and count as FAIL (excluding timeouts: 24/29 = 82.8%). Bare-model run date
+2026-09-04, corpus version 7cd6d14 (as of the run; the FINS corpus was afterwards updated in 7608f47 along with
+the wire-format fixes, scoring semantics unchanged).
+**Scope note**: the corpus was built at milestone M2 (v0.2 era), covering frame parsing / CRC integrity /
+mixed logs / niche protocol semantics / active-probe attribution; v0.3+ features (plc_write / parse_pcap /
+transparent proxy / modbus_rtu endpoint / vendor_hints / iec104 endpoint / enip endpoint) are not in the
+baseline. The detect tier (4 cases, added in v0.4), the iec104 tier (6 cases, added in v0.5.2) and the enip
+tier (4 cases, added in v0.5.3) require live network services or benches and do not fit bare Q&A, so they are
+not in the comparison — tool mode totals 49/49 across eight tiers (re-run 2026-09-07 on the current corpus;
+see "Quality assurance").
 Conclusion: bare models already handle single-frame translation; the value gap concentrates in **niche protocol
 semantics and multi-fault mixed scenarios** — exactly where deterministic parsing + a structured knowledge base live.
-The table above is the dual-runnable five-tier baseline; the detect tier (automatic protocol detection, 4 cases,
-added in v0.4) requires live network services for active probing and does not fit bare Q&A, so it is not in the
-baseline — tool mode totals 39/39 across six tiers (see "Quality assurance").
 
 ## Quick start
 
