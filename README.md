@@ -14,7 +14,7 @@
 
 ![demo](docs/demo.gif)
 
-**状态: v0.4.0 (协议自动识别 + 透明代理 + 故障注入监听 + 四协议读写 + 跨厂商 e2e)。**
+**状态: v0.5.1 (协议自动识别 + 透明代理 + 故障注入监听 + 五协议端点读写 + 跨厂商 e2e)。**
 
 ## 工具
 
@@ -45,7 +45,7 @@
 
 ## 质量保障
 
-- **452 项单测**（codec 纯函数 + 适配器 + 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
+- **461 项单测**（codec 纯函数 + 适配器（含 Modbus RTU）+ 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
 - **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
   pymcprotocol、pypi fins 四个第三方权威实现做真实 socket 交叉验证
   （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）。

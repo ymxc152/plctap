@@ -1,0 +1,55 @@
+name: Sync MCP Registry (rescue)
+
+# 手动触发的 MCP Registry 补录/重发。适用: 标签发布时收录步骤失败,
+# 或发布早于收录功能存在的历史版本 (如 v0.5.1 用旧版 publish.yml 发布, 只上了 PyPI)。
+# 用法: Actions 页选本 workflow → Run workflow → 填 tag 名;
+# 或 CLI: gh workflow run registry-sync.yml -f ref=v0.5.1
+# 前置: 该版本的包必须已在 PyPI (workflow 会先轮询确认, 最多等 5 分钟)。
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "要收录的 tag (vX.Y.Z 形式)"
+        required: true
+        default: "v0.5.1"
+
+permissions:
+  id-token: write  # OIDC 签发发布凭证
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: server.json 版本对齐 ref
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          VERSION="${REF#v}"
+          case "$VERSION" in *[!0-9.]*) echo "::error::ref 需为 vX.Y.Z 形式, got $REF"; exit 1;; esac
+          jq --arg v "$VERSION" '.version = $v | .packages[].version = $v' server.json > server.tmp && mv server.tmp server.json
+      - name: 等待 PyPI 索引生效 (最多 5 分钟)
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          VERSION="${REF#v}"
+          for i in $(seq 1 30); do
+            if curl -fsSL "https://pypi.org/pypi/plctap/$VERSION/json" > /dev/null 2>&1; then
+              echo "plctap==$VERSION 已在 PyPI 可见"
+              exit 0
+            fi
+            echo "等待中... ($i/30)"
+            sleep 10
+          done
+          echo "::error::5 分钟内 PyPI 未出现 plctap==$VERSION"
+          exit 1
+      - name: Login (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish server.json
+        run: ./mcp-publisher publish server.json
