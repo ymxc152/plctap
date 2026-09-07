@@ -52,22 +52,59 @@ jobs:
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
 
-  # GitHub Release 页面: PyPI 发布成功即创建 (与 Registry 解耦, Registry 失败走 registry-sync
-  # 补录不影响 release)。notes 按"上个 tag 到本 tag 的 commits"自动生成, 发版后可手动润色。
+  # GitHub Release 页面: PyPI 发布成功即创建, notes 按 commit 前缀自动分类
+  # (新增/修复/工程/文档/其他) + Full Changelog 链接; 区间无提交时兜底 --generate-notes
+  # —— 任何情况下 Release 页面不得空白 (规则见 docs/PUBLISH.md「GitHub Release notes 规则」)
   github-release:
     needs: publish
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 仅本 job 需要: 创建 Release 对象
+      contents: write  # 仅本 job 需要: 创建/更新 Release 对象
     steps:
       - uses: actions/checkout@v4
-      - name: Create GitHub Release
-        run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
-            --title "plctap $GITHUB_REF_NAME" \
-            || echo "release 已存在, 跳过 (重跑幂等)"
+        with:
+          fetch-depth: 0  # 需要完整历史定位上一个 tag 与提交区间
+      - name: Create GitHub Release (categorized notes)
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then RANGE="$PREV..$TAG"; else RANGE="$TAG"; fi
+          git log --pretty=format:"%s" "$RANGE" > /tmp/commits.txt
+
+          if [ -s /tmp/commits.txt ]; then
+            {
+              echo "## plctap $TAG"
+              echo ""
+              echo "本版变化由 CI 按提交自动生成（区间 \`${RANGE}\`）；版本叙事见 [PLAN.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/PLAN.md) 对应里程碑。"
+              echo ""
+              git log --pretty=format:"%s" "$RANGE" | awk '
+                { if      ($0 ~ /^feat/ || $0 ~ /^add/ || $0 ~ /^新增/) c = "feat"
+                  else if ($0 ~ /^fix/ || $0 ~ /^修复/)                 c = "fix"
+                  else if ($0 ~ /^ci/ || $0 ~ /^chore/ || $0 ~ /^build/ || $0 ~ /^release/ || $0 ~ /^merge/) c = "eng"
+                  else if ($0 ~ /^docs/ || $0 ~ /^文档/)                c = "docs"
+                  else                                                  c = "misc"
+                  body[c] = body[c] "- " $0 "\n" }
+                END { n = split("feat|fix|eng|docs|misc", keys, "|")
+                      split("✨ 新增 / 能力|🐛 修复|🔧 工程 / CI / 发布|📝 文档|♻️ 其他变更", titles, "|")
+                      for (i = 1; i <= n; i++) if (keys[i] in body) { print "### " titles[i]; printf "%s", body[keys[i]]; print "" } }'
+              echo "---"
+              if [ -n "$PREV" ]; then
+                echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"
+              fi
+            } > /tmp/body.md
+            ARGS=(--notes-file /tmp/body.md)
+          else
+            ARGS=(--generate-notes)  # 兜底: 区间无提交也要有 notes, 页面永不空白
+          fi
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG 已存在 (人工撰写优先), CI 不覆盖 —— 保证页面不空白靠自动创建, 不靠改写"
+          else
+            gh release create "$TAG" --verify-tag --title "plctap $TAG" "${ARGS[@]}"
+            echo "Release $TAG 已创建 (categorized notes)"
+          fi
 
   # MCP Registry 收录: server.json 里引用的 pypi 包版本会被 registry 校验真实存在,
   # 因此必须等 publish (PyPI) 成功后再发, 且要等 PyPI 索引对 CDN 生效。

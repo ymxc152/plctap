@@ -77,6 +77,17 @@ uvx plctap                           # 任意机器一行装起来
   commits 生成, 值得讲的亮点 (如"台架抓出 S7 审计缺口")发版后手动润色到 release 页
 - 1.0: 语义定稿 (评测对比表滚动更新 + 产品化收官项齐了之后; 原条件中的双端截图已取消)
 
+### GitHub Release notes 规则（强制——Release 页面永不空白）
+- 每次 tag 发版, CI (publish.yml 的 github-release job) 保证 Release 存在且 notes 非空:
+  不存在则按 commit 前缀自动分类创建——✨ 新增/能力 (feat/add/新增) · 🐛 修复 (fix/修复) ·
+  🔧 工程/CI/发布 (ci/chore/build/release/merge) · 📝 文档 (docs) · ♻️ 其他,
+  末尾附 Full Changelog 比较链接; 区间无提交时兜底 --generate-notes
+- **人工撰写的 notes 优先**: CI 只在 Release 不存在时创建, 绝不改写已有 Release ——
+  发版时先写好叙事版 notes 即可, CI 是兜底不是覆盖者
+- 发版 notes 写法参照 v0.5.5: 修复了什么 + 为什么全量测试没抓到 (方法学) + 流程升级 + 质量数字 + 安装命令
+- **依赖 commit message 前缀规范** (fix:/docs:/ci:/feat:...) —— 自动分类质量取决于前缀, 杂乱前缀进"其他"
+- 历史空 tag 可事后补录: 本地 `gh release create vX.Y.Z --verify-tag --title ... --notes-file`
+
 ## Skill 的安装方式 (重点, 与包分开)
 
 `skill/SKILL.md` **不进 wheel**, 原因是 skill 是客户端侧的指令文件, 不是运行时
