@@ -1,0 +1,37 @@
+# OPC UA 连接级故障知识库 (v0.6)
+# OPC UA 为会话协议, 无帧级证据 —— 条目按 diagnose 的 probe_result
+# (failure_class) 匹配; 读节点类错误 (BadNodeIdUnknown / BadNotReadable
+# 等) 在 plc_read 的结构化报错里直接带 UA 状态码名称, 不经本 KB。
+# 引擎按条目 protocol 域过滤, 本文件条目仅对 protocol="opcua" 生效。
+entries:
+- id: opcua_security_session_rejected
+  protocol: opcua
+  match:
+    failure_class:
+    - connected_but_no_reply
+  candidate:
+    symptom: TCP 可达但 UA 会话未建立 (CreateSession/ActivateSession 失败)
+    root_cause: 端点安全策略不匹配 —— 服务器禁用了 SecurityPolicy None
+      (要求签名/加密), 或客户端证书不被信任; plctap 诊断模式仅支持 None 策略
+    suggested_action: 在服务器配置启用 SecurityPolicy None (诊断专用端点),
+      或用厂家工具核对 Endpoints 与证书信任列表; 确认 4840 背后确为
+      OPC UA 服务而非同端口其他服务
+    confidence: 0.92
+    next_tools:
+    - probe_device
+- id: opcua_service_status_rejected
+  protocol: opcua
+  match:
+    failure_class:
+    - exception_response
+  candidate:
+    symptom: UA 会话建立但服务被服务端状态码拒绝 (reachable=True, 在线且回 UA 语义)
+    root_cause: 应用层拒绝 —— 常见 BadSecurityChecksFailed (安全检查)、
+      BadUserAccessDenied (用户权限)、BadSessionIdInvalid (会话失效);
+      具体 Status 码见 exception_code (0x8xxxxxxx, Bad* 前缀)
+    suggested_action: 对照 exception_code 的 UA 状态码名称定位; 权限类核对
+      匿名/用户身份配置, 安全类核对证书信任; 会话失效类检查空闲超时
+    confidence: 0.88
+    next_tools:
+    - plc_read
+    - plc_browse

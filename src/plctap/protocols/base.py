@@ -99,11 +99,34 @@ class ProtocolAdapter(ABC):
         """
         raise NotImplementedError(f"{self.name} write not implemented yet (M3)")
 
-    @abstractmethod
     async def send_raw(
         self, target: Target, frame_hex: str, timeout_ms: int | None = None
     ) -> RawExchange:
-        """发送原始帧并等待一帧响应 (M3, 闸门后注册)。"""
+        """发送原始帧并等待一帧响应 (M3, 闸门后注册)。
+
+        与 write 同为"可选能力": 基类默认不支持, 子类覆写才有 —— 元数据
+        经 server.list_protocols 的类级比较如实上报。会话式协议没有原始
+        帧概念 (如 OPC UA), 不覆写即是正确声明 (v0.6 起从抽象方法降级,
+        否则这类协议被迫实现一个只会抛错的方法, 元数据反而虚报能力)。
+        """
+        raise NotImplementedError(f"{self.name} send_raw not supported (session protocol or not implemented)")
+
+    async def browse(
+        self,
+        target: Target,
+        node: str = "ns=0;i=85",
+        limit: int = 200,
+        timeout_ms: int | None = None,
+        **options,
+    ) -> dict:
+        """地址空间浏览: 从 node 展开一层子节点 (v0.6, OPC UA 场景)。
+
+        可选能力 (同 write/send_raw 模式): 返回
+        {"node", "children", "total", "shown", "truncated"} —— 截断时
+        truncated=True 且 total 为全量数 (sentinel 语义, 同 parse_pcap)。
+        输出预算由适配器内硬上限保证, 防止大地址空间撑爆 Agent 上下文。
+        """
+        raise NotImplementedError(f"{self.name} browse not supported (not a session protocol or not implemented)")
 
 
 _REGISTRY: dict[str, type[ProtocolAdapter]] = {}

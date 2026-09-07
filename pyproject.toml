@@ -1,7 +1,7 @@
 [project]
 name = "plctap"
 version = "0.5.5"
-description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 / IEC 60870-5-104 / EtherNet/IP PLCs"
+description = "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 / IEC 60870-5-104 / EtherNet/IP / OPC UA PLCs"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -16,6 +16,8 @@ keywords = [
     "plc",
     "industrial",
     "scada",
+    "opcua",
+    "opc-ua",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -32,6 +34,7 @@ dependencies = [
     "fastmcp>=2.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    "asyncua>=2.0",
 ]
 
 [project.urls]

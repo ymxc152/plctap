@@ -21,7 +21,7 @@ from plctap.conn.manager import ConnectionPool
 from plctap.models import ProbeResult, ReadResult, Target
 from plctap.protocols.base import ProtocolAdapter, adapter_for, known_protocols
 
-DEFAULT_SCAN_PORTS = [102, 502, 2000, 2404, 44818, 5007, 6000, 9600, 9601]
+DEFAULT_SCAN_PORTS = [102, 502, 2000, 2404, 44818, 4840, 5007, 6000, 9600, 9601]
 
 # 端口先验: 仅用于同级候选排序 (先验匹配端口优先), 不参与置信度评分。
 # 44818 是 EtherNet/IP 规范端口 (v0.5.3 起支持 enip); MELSEC 的 44818
@@ -31,6 +31,7 @@ DEFAULT_SCAN_PORTS = [102, 502, 2000, 2404, 44818, 5007, 6000, 9600, 9601]
 PORT_PRIORS: dict[int, str | None] = {
     102: "s7",
     2404: "iec104",
+    4840: "opcua",
     502: "modbus",
     2000: "melsec",
     44818: "enip",
@@ -88,6 +89,11 @@ async def _deep_read_enip(ad: ProtocolAdapter, t: Target) -> ReadResult:
     return await ad.read(t, "alpha[0]", 1)
 
 
+async def _deep_read_opcua(ad: ProtocolAdapter, t: Target) -> ReadResult:
+    """最小读: Server_ServerArray (规范强制可读节点, 不依赖厂商地址空间)。"""
+    return await ad.read(t, "ns=0;i=2254", 1)
+
+
 @dataclass(frozen=True)
 class _Profile:
     """单协议识别配置 (注册表条目): 证据文案 + 深读参数 + next_step 模板。
@@ -101,6 +107,10 @@ class _Profile:
     exception_evidence: str | None
     deep_read: DeepReadFn  # 最小验证读 (地址/数量按协议语义取最小)
     next_step: str  # next_step 模板, .format(host=..., port=...) 后可直接执行
+    # 单协议 probe 独立预算 (秒); None = 用全局 FINGERPRINT_TIMEOUT_SEC。
+    # opcua 的完整会话握手 (HEL/OPN/CreateSession/Activate) 比单帧 probe
+    # 重, 0.8s 全局预算下局域网偶发超时, 给独立预算 (v0.6)
+    probe_budget: float | None = None
 
 
 _PROFILES: dict[str, _Profile] = {
@@ -129,6 +139,19 @@ _PROFILES: dict[str, _Profile] = {
             "plc_read(protocol='enip', host='{host}', port={port}, "
             "address='alpha[0]', count=1)"
         ),
+    ),
+    "opcua": _Profile(
+        evidence=(
+            "UA 会话建立自洽 (HEL/OPN/CreateSession/ActivateSession, "
+            "SecurityPolicy None), Server_ServerArray 最小读通过"
+        ),
+        exception_evidence=None,
+        deep_read=_deep_read_opcua,
+        next_step=(
+            "plc_read(protocol='opcua', host='{host}', port={port}, "
+            "address='ns=0;i=2254', count=1); 或 plc_browse 从 ns=0;i=85 摸地址空间"
+        ),
+        probe_budget=2.5,
     ),
     "modbus_rtu": _Profile(
         evidence="RTU 帧 CRC 自洽且功能码回显 (无 MBAP, addr+PDU+CRC16) — 网关/串口服务器 RTU 模式",
@@ -327,10 +350,14 @@ class DeviceDetector:
     async def _fingerprint(
         self, host: str, port: int, name: str, budget: float
     ) -> tuple[ProbeResult | None, str]:
-        """单协议 probe, 预算内未完成视作该协议不可达 (返回 None + 说明)。"""
+        """单协议 probe, 预算内未完成视作该协议不可达 (返回 None + 说明)。
+
+        预算取该协议 profile 的独立预算 (如有), 否则用全局 budget。
+        """
         target = Target(protocol=name, host=host, port=port)
+        effective = self._profile(name).probe_budget or budget
         try:
-            return (await asyncio.wait_for(self._adapters[name].probe(target), budget)), ""
+            return (await asyncio.wait_for(self._adapters[name].probe(target), effective)), ""
         except TimeoutError:
             return None, "timeout"
         except Exception as e:

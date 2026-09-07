@@ -220,6 +220,11 @@ def diagnose(
 
     candidates: list[Candidate] = []
     for entry in kb_entries():
+        # 协议域过滤: 显式声明协议的条目只对该协议生效 (common.yaml 等
+        # "any" 条目跨协议通用)。v0.6 起opcua 引入协议专属 probe 条目
+        # (安全策略/会话拒绝), 不过滤会泄漏到其他协议的诊断结果里
+        if entry.get("protocol", "any") not in (None, "any", protocol):
+            continue
         if not _match_probe(entry, probe_result):
             continue
         matched = [

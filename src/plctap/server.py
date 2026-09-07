@@ -29,13 +29,15 @@ from plctap.protocols.s7.adapter import S7Adapter  # noqa: F401  # 注册副作�
 from plctap.protocols.modbus.adapter import ModbusAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.iec104.adapter import Iec104Adapter  # noqa: F401  # 注册副作用
 from plctap.protocols.enip.adapter import EnipAdapter  # noqa: F401  # 注册副作用
+from plctap.protocols.opcua.adapter import OpcuaAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.detect import DetectResult, DeviceDetector
 from plctap.listener import ListenerRegistry
 from plctap.proxy import ProxyRegistry
 from plctap.safety import AuditLog
 
 _INSTRUCTIONS = (
-    "plctap 是 Agent 的 PLC 驱动层 (Modbus TCP / FINS / MELSEC)。\n"
+    "plctap 是 Agent 的 PLC 驱动层 (Modbus TCP/RTU、FINS、MELSEC、S7comm、"
+    "IEC 104、EtherNet/IP、OPC UA)。\n"
     "典型流程: probe_device 确认连通性与故障层 -> plc_read 取数 -> "
     "parse_frame/validate_frame 做报文级深挖。\n"
     "报文证据三来源: frame_hex / log_snippet / pcap 文件 (parse_pcap)。\n"
@@ -46,21 +48,22 @@ _INSTRUCTIONS = (
 
 
 def _validate_address(protocol: str, address: int | str) -> None:
-    """服务层地址类型闸: enip 用 tag 名字符串, 其余协议用整数地址。
+    """服务层地址类型闸: enip 用 tag 名、opcua 用 NodeId 字符串, 其余用整数地址。
 
-    enip 适配器只接受字符串 tag (如 "alpha[0]"), 而 MCP schema 此前把
-    address 钉死为 int, 导致 enip 端点经工具层无法调用 —— 签名放宽为
-    int | str 后在此按协议给出明确报错, 而不是漏进适配器深处炸 TypeError。
+    enip 适配器只接受字符串 tag (如 "alpha[0]"), opcua 只接受 NodeId
+    字符串 (如 "ns=2;i=5"), 而 MCP schema 此前把 address 钉死为 int,
+    导致字符串寻址的端点经工具层无法调用 —— 签名放宽为 int | str 后
+    在此按协议给出明确报错, 而不是漏进适配器深处炸 TypeError (enip
+    曾因此整端点不可用)。
     """
-    if protocol == "enip":
+    if protocol in ("enip", "opcua"):
         if not isinstance(address, str):
-            raise ValueError(
-                'enip 的 address 必须是 tag 名字符串 (如 "alpha[0]"); '
-                "整数地址仅用于其余协议"
-            )
+            kind = "tag 名字符串 (如 \"alpha[0]\")" if protocol == "enip" else \
+                "NodeId 字符串 (如 \"ns=2;i=5\")"
+            raise ValueError(f"{protocol} 的 address 必须是{kind}; 整数地址仅用于其余协议")
     elif not isinstance(address, int) or isinstance(address, bool):
         raise ValueError(
-            f"{protocol} 的 address 必须是整数地址; tag 名字符串仅 enip 支持"
+            f"{protocol} 的 address 必须是整数地址; 字符串地址仅 enip/opcua 支持"
         )
 
 
@@ -105,6 +108,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
                 "read": True,
                 "write": config.allow_write and cls.write is not ProtocolAdapter.write,
                 "send_raw": config.allow_write and cls.send_raw is not ProtocolAdapter.send_raw,
+                "browse": cls.browse is not ProtocolAdapter.browse,
             }
             if meta:
                 entry.update({
@@ -167,6 +171,8 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         - MELSEC: address 为起始编号, count 为点数 (位软元件按 16 点/字)
         - S7: address 为字节地址, count 为**字节数** (count=4 + uint16 → 2 个值)
         - EtherNet/IP: address 为 tag 名字符串 (如 "alpha[0]"), count 为元素个数
+        - OPC UA: address 为 NodeId 字符串 (如 "ns=2;i=5" / "ns=2;s=Demo.Double"),
+          count 为数组节点返回元素上限 (0=全部); 值按 UA 内建类型原生返回
 
         datatype 取 uint16/int16/float32, None 返回原始 16 位值 + 所有常见数据类型的多解释 (interpretations 字段), 便于 Agent 识别正确的数据类型。
         byteorder 仅影响 float32 寄存器对顺序 (big=ABCD, little=DCBA)。
@@ -189,6 +195,43 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             from plctap.protocols.common import interpret_all
             result.interpretations = interpret_all(result.raw_registers)
         return result
+
+    @mcp.tool
+    async def plc_browse(
+        protocol: str,
+        host: str,
+        port: int,
+        node: str = "ns=0;i=85",
+        limit: int = 200,
+        unit: int = 1,
+        timeout_ms: int | None = None,
+    ) -> dict:
+        """浏览地址空间: 从 node 展开一层子节点 (诊断场景的"列目录")。
+
+        返回 {node, children, total, shown, truncated}: children 每项含
+        node_id / display_name / node_class; 超出输出预算时 truncated=true
+        且 total 给出全量数 —— 需要更深层级就对着子 node_id 再调一次。
+        默认从 Objects 文件夹 (ns=0;i=85) 起步; 对 plc_read 前先摸清
+        设备地址空间结构时用。
+        当前仅 OPC UA 支持 (会话协议无帧概念, browse 是它的"读目录"形态);
+        其他协议用 list_protocols 的 read_options 直接构造地址。
+        输出预算: 单次最多 200 个子节点 (约 30KB), 防止大地址空间撑爆上下文。
+        """
+        adapter_cls = adapter_for(protocol)
+        if adapter_cls.browse is ProtocolAdapter.browse:
+            supported = ", ".join(
+                n for n in known_protocols()
+                if adapter_for(n).browse is not ProtocolAdapter.browse
+            ) or "(none)"
+            raise ValueError(
+                f"{protocol} browse 未实现 (plc_browse 当前支持 {supported}); 详见 list_protocols"
+            )
+        return await adapter_cls(pool, config).browse(
+            Target(protocol=protocol, host=host, port=port, unit=unit),
+            node=node,
+            limit=limit,
+            timeout_ms=timeout_ms,
+        )
 
     # ------------------------------------------------------------ 诊断层
 
@@ -214,6 +257,12 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         """
         if not any((frame_hex, log_snippet, host)):
             raise ValueError("provide at least one of frame_hex / log_snippet / host+port")
+        if protocol == "opcua" and (frame_hex or log_snippet):
+            # 设计声明 (非缺陷): OPC UA 是会话协议, 无帧级证据
+            raise ValueError(
+                "opcua 为会话协议, 不支持帧级证据 (frame_hex/log_snippet); "
+                "请用 host+port 做连接级探测诊断 (kb 覆盖安全策略/会话拒绝类故障)"
+            )
         probe_result = None
         if host:
             if not port:
@@ -298,6 +347,12 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             from plctap.protocols.auto import parse_auto
 
             return parse_auto(protocol, frame)
+        if protocol == "opcua":
+            raise ValueError(
+                "opcua 为会话协议, 不做帧级诊断 (设计声明, 非缺陷): "
+                "帧级工具仅覆盖帧式协议; OPC UA 用 probe_device / plc_read / "
+                "plc_browse 做连接级诊断"
+            )
         raise ValueError(f"parse_frame not implemented for {protocol!r} yet")
 
     @mcp.tool
@@ -316,6 +371,11 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         """
         if direction not in ("req", "resp"):
             raise ValueError(f"direction must be 'req' or 'resp', got {direction!r}")
+        if protocol == "opcua":
+            raise ValueError(
+                "opcua 为会话协议, 不做帧级诊断 (设计声明, 非缺陷); "
+                "用 probe_device / plc_read / plc_browse 做连接级诊断"
+            )
         protocol = _norm_frame_protocol(protocol)
         try:
             frame = bytes.fromhex(frame_hex)
@@ -431,10 +491,11 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     ) -> DetectResult:
         """设备自动识别: 给定 host 自动扫端口并判定协议 (v0.4, 全程只读)。
 
-        流程: 并发扫描候选端口 (缺省 102/502/2000/44818/5007/6000/9600/9601,
-        单端口连接预算 0.5s) -> 开放端口并发跑四协议 probe 指纹 (单协议
-        预算 timeout_ms/1000, 缺省 0.8s) -> high 候选按协议做一次最小读
-        验证 (deep=True 缺省; 成功升级 verified, 失败留痕保持 high;
+        流程: 并发扫描候选端口 (缺省 102/502/2000/2404/44818/4840/5007/6000/9600/9601,
+        单端口连接预算 0.5s) -> 开放端口并发跑已注册协议 probe 指纹
+        (单协议预算 timeout_ms/1000, 缺省 0.8s; 个别协议有独立预算如
+        opcua 的完整会话握手) -> high 候选按协议做一次最小读验证
+        (deep=True 缺省; 成功升级 verified, 失败留痕保持 high;
         deep=False 跳过验证读)。
         只读保证: 全程只发握手帧 + 最小读帧, 不写任何数据; 且识别 ≠ 可访问
         —— 例如 S7 PUT/GET 被关闭时识别照样成功, 读 DB 仍可能失败。
@@ -555,7 +616,18 @@ def _register_write_tools(
             bytes.fromhex(frame_hex)
         except ValueError as e:
             raise ValueError(f"frame_hex is not valid hex: {e}") from e
-        adapter = adapter_for(protocol)(pool, config)
+        adapter_cls = adapter_for(protocol)
+        if adapter_cls.send_raw is ProtocolAdapter.send_raw:
+            # 类级诚实判定 (同 plc_write): 会话式协议 (如 opcua) 无原始帧概念,
+            # 基类默认只会抛 NotImplemented —— 在此给出可用协议清单更有用
+            supported = ", ".join(
+                n for n in known_protocols()
+                if adapter_for(n).send_raw is not ProtocolAdapter.send_raw
+            ) or "(none)"
+            raise ValueError(
+                f"{protocol} send_raw 未实现 (send_frame 当前支持 {supported}); 详见 list_protocols"
+            )
+        adapter = adapter_cls(pool, config)
         audit.record(
             tool="send_frame",
             target=f"{protocol}://{host}:{port} unit={unit}",
