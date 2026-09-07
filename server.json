@@ -3,14 +3,19 @@
   "name": "io.github.ymxc152/plctap",
   "title": "plctap",
   "description": "Agent-PLC MCP Server: connect, read and diagnose Modbus / FINS / MELSEC / Siemens S7 PLCs.",
-  "repository": { "url": "https://github.com/ymxc152/plctap", "source": "github" },
-  "version": "0.5.1",
+  "repository": {
+    "url": "https://github.com/ymxc152/plctap",
+    "source": "github"
+  },
+  "version": "0.5.2",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "plctap",
-      "version": "0.5.1",
-      "transport": { "type": "stdio" }
+      "version": "0.5.2",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ]
 }
