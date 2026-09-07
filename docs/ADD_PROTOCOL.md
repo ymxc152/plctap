@@ -103,6 +103,9 @@ class YourAdapter(ProtocolAdapter):
 - `locked_exchange()` 封装了"目标级锁内一次请求-响应"的通用逻辑
 - 超时统一包装为 `ProtocolError`，子类化以区分异常类型
 - 写操作在 `write()` 中实现，server 层的写闸门自动控制
+- **write() 必须声明 `on_frame` 参数并在请求帧构建后、任何网络动作前调用
+  `on_frame(request.hex())`** —— 这是审计日志 (D5 红线: 发送前留痕, 失败也留)
+  的挂钩点；漏调意味着该协议的写操作完全绕过审计 (s7 曾踩此坑, v0.5.5 修复)
 
 ## Step 4: kb.yaml
 
