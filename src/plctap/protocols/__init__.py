@@ -30,4 +30,8 @@ def codec_for(protocol: str) -> ModuleType:
         from plctap.protocols.modbus import codec
 
         return codec  # RTU 与 TCP 同 codec (parse_rtu/validate_rtu 轨道)
+    if protocol == "enip":
+        from plctap.protocols.enip import codec
+
+        return codec
     raise KeyError(f"unknown protocol {protocol!r}")

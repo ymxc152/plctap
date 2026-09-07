@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 from plctap import streams
 from plctap.protocols.fins import codec as fins_codec
+from plctap.protocols.enip import codec as enip_codec
 from plctap.protocols.iec104 import codec as i104
 from plctap.protocols.melsec import codec as mc_codec
 
@@ -295,6 +296,8 @@ def build_normal_response(protocol: str, frame: bytes, fins_node: int | None = N
         return _fins_response(frame, fins_node)
     if protocol == "iec104":
         return _iec104_response(frame)
+    if protocol == "enip":
+        return _enip_response(frame)
     return _melsec_response(frame)  # melsec
 
 
@@ -351,6 +354,82 @@ def _apci_seq(frame: bytes, idx: int) -> int:
     import struct as _s
     (w,) = _s.unpack_from("<H", frame, 2 + idx * 2)
     return w >> 1
+
+
+def _enip_response(frame: bytes) -> bytes | None:
+    """ENIP 钓鱼回帧: RegisterSession 授予句柄 1, ListIdentity 回罐头身份,
+    SendRRData 的 0x4C 读回罐头 DINT/REAL, 0x4D 写回成功应答, 未知 tag 回
+    CIP status 0x05 (PATH_DESTINATION_UNKNOWN)。"""
+    try:
+        (command, _length, _session, _status, off) = enip_codec.parse_enip_header(frame)
+    except ValueError:
+        return None
+    if command == enip_codec.CMD_REGISTER_SESSION:
+        return enip_codec.build_enip(enip_codec.CMD_REGISTER_SESSION,
+                                     frame[off:], session=1)
+    if command == enip_codec.CMD_LIST_IDENTITY:
+        ident = (
+            struct.pack("<H", 1) + b"\x00" * 16
+            + struct.pack("<I", 1) + struct.pack("<H", 12) + struct.pack("<H", 66)
+            + bytes([1, 5]) + struct.pack("<H", 0) + struct.pack("<I", 0xC0FFEE)
+            + bytes([14]) + b"plctap-fixture"
+        )
+        payload = struct.pack("<H", 1) + struct.pack("<HH", 0x000C, len(ident)) + ident
+        return enip_codec.build_enip(enip_codec.CMD_LIST_IDENTITY, payload, session=1)
+    if command != enip_codec.CMD_SEND_RR_DATA:
+        return None
+    # SendRRData: 解嵌入的 0x4C 读 / 0x4D 写
+    try:
+        (_iface, _timeout, nitems) = struct.unpack_from("<IHH", frame, off)
+        if nitems != 2:
+            return None
+        o = off + 8
+        addr_type, addr_len = struct.unpack_from("<HH", frame, o)
+        o += 4 + addr_len
+        data_type, data_len = struct.unpack_from("<HH", frame, o)
+        o += 4
+        cip = frame[o:o + data_len]
+        session = struct.unpack_from("<I", frame, 4)[0]
+    except struct.error:
+        return None
+    if not cip or cip[0] not in (0x4C, 0x4D):
+        return None
+    if cip[0] == 0x4D:
+        reply = bytes([enip_codec.SVC_WRITE_TAG_REPLY, 0x00, 0x00, 0x00])
+        cip_out = reply
+    else:
+        # 读: 解 tag 名 (0x91 符号段, 扫描式 —— 兼容带 MR 路径前缀的请求),
+        # 罐头值: alpha*=DINT 42/43, beta*=REAL 0.25/0.5; 元素数 = 尾部 2 字节
+        try:
+            name, count = _enip_parse_symbol_and_count(cip)
+        except (struct.error, IndexError, ValueError):
+            return None
+        if name.startswith("alpha"):
+            cip_out = (bytes([0xCC, 0x00, 0x00, 0x00]) + struct.pack("<H", 0xC4)
+                       + b"".join(struct.pack("<I", 42 + i) for i in range(count)))
+        elif name.startswith("beta"):
+            words = []
+            for i in range(count):
+                bits = struct.unpack("<I", struct.pack("<f", 0.25 * (i + 1)))[0]
+                words.extend(struct.pack("<HH", bits & 0xFFFF, bits >> 16))
+            cip_out = (bytes([0xCC, 0x00, 0x00, 0x00]) + struct.pack("<HH", 0xCA, count)
+                       + b"".join(words))
+        else:
+            cip_out = bytes([0xCC, 0x00, 0x05, 0x00, 0x00])  # CIP status 0x05
+    return enip_codec.build_send_rr_data(session, cip_out)
+
+
+def _enip_parse_symbol_and_count(cip: bytes) -> tuple[str, int]:
+    """从 Read Tag 请求 CIP 里解 (符号名, 元素数): 扫描 0x91 符号段。"""
+    i = 0
+    while i < len(cip) - 2:
+        if cip[i] == 0x91:
+            name_len = cip[i + 1]
+            name = cip[i + 2:i + 2 + name_len].decode("ascii", errors="replace")
+            (count,) = struct.unpack_from("<H", cip, len(cip) - 2)
+            return name, count
+        i += 1
+    raise ValueError("no symbolic segment")
 
 
 def _modbus_response(frame: bytes) -> bytes | None:

@@ -22,7 +22,33 @@ def parse_auto(protocol: str, frame: bytes) -> ParseResult:
         return _parse_melsec(frame)
     if protocol == "iec104":
         return _parse_iec104(frame)
+    if protocol == "enip":
+        return _parse_enip(frame)
     raise ValueError(f"parse_frame not implemented for {protocol!r} yet")
+
+
+def _parse_enip(frame: bytes) -> ParseResult:
+    """auto 规则: ENIP 命令码客观判帧; 方向按命令语义。
+
+    RegisterSession/ListIdentity 无会话时多为请求 (客户端发起),
+    SendRRData 按请求侧解析 (嵌入 0x4C/0x4D 服务); 应答侧诊断走
+    parse_response 显式指定。
+    """
+    from plctap.protocols.enip import codec
+
+    try:
+        command, _length, _session, _status, _off = codec.parse_enip_header(frame)
+    except ValueError:
+        return codec.parse_request(frame)
+    if command in (codec.CMD_REGISTER_SESSION, codec.CMD_LIST_IDENTITY,
+                   codec.CMD_UNREGISTER_SESSION):
+        return codec.parse_request(frame)
+    # SendRRData: 诊断场景多为设备应答 (含 CIP 状态/tag 数据), 走应答侧;
+    # 请求侧 (嵌入 0x4C/0x4D) 解析失败时回退
+    try:
+        return codec.parse_response(frame)
+    except ValueError:
+        return codec.parse_request(frame)
 
 
 def _parse_iec104(frame: bytes) -> ParseResult:

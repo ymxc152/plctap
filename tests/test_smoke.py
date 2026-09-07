@@ -216,3 +216,41 @@ async def test_parse_frame_s7_auto_direction(tmp_path):
     assert req.data.fields[0].name == "tpkt_version" and req.data.valid
     assert rsp.data.valid
     assert {f.name: f.value for f in rsp.data.fields}["rosctr"] == 3
+
+
+# ---------------------------------------------------------------- enip 经 MCP 工具层 (tag 名地址)
+
+
+async def test_plc_read_enip_tag_address(tmp_path):
+    """enip 经 MCP 工具层用字符串 tag 名读数 (回归: address 曾被 schema 钉死为 int)。"""
+    from test_adapter_enip import FakeEnipServer
+
+    s = FakeEnipServer()
+    host, port = await s.start()
+    try:
+        app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
+        async with Client(app) as client:
+            result = await client.call_tool(
+                "plc_read",
+                {"protocol": "enip", "host": host, "port": port,
+                 "address": "alpha[0]", "count": 3, "datatype": "dint"},
+            )
+    finally:
+        await s.stop()
+    assert result.data.interpreted == [42, 43, 44]
+
+
+async def test_plc_read_address_type_gate(tmp_path):
+    """地址类型闸: enip 拒绝整数地址, 其余协议拒绝 tag 名 (服务层明确报错, 不进适配器)。"""
+    app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
+    async with Client(app) as client:
+        with pytest.raises(Exception, match="tag 名"):
+            await client.call_tool(
+                "plc_read",
+                {"protocol": "enip", "host": "127.0.0.1", "port": 1, "address": 0},
+            )
+        with pytest.raises(Exception, match="整数地址"):
+            await client.call_tool(
+                "plc_read",
+                {"protocol": "modbus", "host": "127.0.0.1", "port": 1, "address": "alpha[0]"},
+            )

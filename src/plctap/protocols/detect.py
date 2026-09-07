@@ -24,8 +24,8 @@ from plctap.protocols.base import ProtocolAdapter, adapter_for, known_protocols
 DEFAULT_SCAN_PORTS = [102, 502, 2000, 2404, 44818, 5007, 6000, 9600, 9601]
 
 # 端口先验: 仅用于同级候选排序 (先验匹配端口优先), 不参与置信度评分。
-# 44818 是 EtherNet/IP 规范端口, 与本仓库 melsec 的 default_port 撞号 ——
-# 纯属数字巧合, 不构成 melsec 先验; EtherNet/IP 接入后更新为先验。
+# 44818 是 EtherNet/IP 规范端口 (v0.5.3 起支持 enip); MELSEC 的 44818
+# default_port 仅是数字巧合, 不构成 melsec 先验。
 # 502 上 modbus(TCP) 与 modbus_rtu 同端口共存: 先验给 TCP (规范端口语义),
 # 网关 RTU 模式靠 probe 指纹区分 (TCP 探测在 RTU 设备上落 connected_but_no_reply)。
 PORT_PRIORS: dict[int, str | None] = {
@@ -33,7 +33,7 @@ PORT_PRIORS: dict[int, str | None] = {
     2404: "iec104",
     502: "modbus",
     2000: "melsec",
-    44818: None,
+    44818: "enip",
     5007: "melsec",
     6000: "melsec",
     9600: "fins",
@@ -83,6 +83,11 @@ async def _deep_read_iec104(ad: ProtocolAdapter, t: Target) -> ReadResult:
     return await ad.read(t, address=0, count=1, ca=1)
 
 
+async def _deep_read_enip(ad: ProtocolAdapter, t: Target) -> ReadResult:
+    """最小读: 罐头 tag alpha[0] (1 元素)。"""
+    return await ad.read(t, "alpha[0]", 1)
+
+
 @dataclass(frozen=True)
 class _Profile:
     """单协议识别配置 (注册表条目): 证据文案 + 深读参数 + next_step 模板。
@@ -114,6 +119,15 @@ _PROFILES: dict[str, _Profile] = {
         next_step=(
             "plc_read(protocol='iec104', host='{host}', port={port}, address=0, "
             "count=10, options={{'ca': 1}})"
+        ),
+    ),
+    "enip": _Profile(
+        evidence="ENIP 封装头自洽 (ListIdentity 应答含 CIP Identity 项)",
+        exception_evidence=None,
+        deep_read=_deep_read_enip,
+        next_step=(
+            "plc_read(protocol='enip', host='{host}', port={port}, "
+            "address='alpha[0]', count=1)"
         ),
     ),
     "modbus_rtu": _Profile(

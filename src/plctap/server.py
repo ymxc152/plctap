@@ -28,6 +28,7 @@ from plctap.protocols.melsec.adapter import MelsecAdapter  # noqa: F401  # 注�
 from plctap.protocols.s7.adapter import S7Adapter  # noqa: F401  # 注册副作用
 from plctap.protocols.modbus.adapter import ModbusAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.iec104.adapter import Iec104Adapter  # noqa: F401  # 注册副作用
+from plctap.protocols.enip.adapter import EnipAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.detect import DetectResult, DeviceDetector
 from plctap.listener import ListenerRegistry
 from plctap.proxy import ProxyRegistry
@@ -42,6 +43,25 @@ _INSTRUCTIONS = (
     "所有工具无状态: 每次调用都带 host/port, 不需要维护会话 (listener 是例外,\n"
     "它有 start/stop/frames 生命周期)。"
 )
+
+
+def _validate_address(protocol: str, address: int | str) -> None:
+    """服务层地址类型闸: enip 用 tag 名字符串, 其余协议用整数地址。
+
+    enip 适配器只接受字符串 tag (如 "alpha[0]"), 而 MCP schema 此前把
+    address 钉死为 int, 导致 enip 端点经工具层无法调用 —— 签名放宽为
+    int | str 后在此按协议给出明确报错, 而不是漏进适配器深处炸 TypeError。
+    """
+    if protocol == "enip":
+        if not isinstance(address, str):
+            raise ValueError(
+                'enip 的 address 必须是 tag 名字符串 (如 "alpha[0]"); '
+                "整数地址仅用于其余协议"
+            )
+    elif not isinstance(address, int) or isinstance(address, bool):
+        raise ValueError(
+            f"{protocol} 的 address 必须是整数地址; tag 名字符串仅 enip 支持"
+        )
 
 
 def create_app(config: PlctapConfig | None = None) -> FastMCP:
@@ -131,7 +151,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         protocol: str,
         host: str,
         port: int,
-        address: int,
+        address: int | str,
         count: int = 1,
         unit: int = 1,
         datatype: str | None = None,
@@ -146,6 +166,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         - FINS: address 为字地址, count 为字数
         - MELSEC: address 为起始编号, count 为点数 (位软元件按 16 点/字)
         - S7: address 为字节地址, count 为**字节数** (count=4 + uint16 → 2 个值)
+        - EtherNet/IP: address 为 tag 名字符串 (如 "alpha[0]"), count 为元素个数
 
         datatype 取 uint16/int16/float32, None 返回原始 16 位值 + 所有常见数据类型的多解释 (interpretations 字段), 便于 Agent 识别正确的数据类型。
         byteorder 仅影响 float32 寄存器对顺序 (big=ABCD, little=DCBA)。
@@ -153,6 +174,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         options: 协议特有参数, 由各协议 adapter 自行定义与校验。
         用 list_protocols 查看每个协议的 read_options 说明。
         """
+        _validate_address(protocol, address)
         target = Target(protocol=protocol, host=host, port=port, unit=unit)
         result = await _adapter(protocol).read(
             target,
@@ -272,7 +294,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             if direction == "req":
                 return sc.parse_request(frame)
             return sc.parse_read_response(frame)
-        if protocol in ("modbus", "fins", "iec104"):
+        if protocol in ("modbus", "fins", "iec104", "enip"):
             from plctap.protocols.auto import parse_auto
 
             return parse_auto(protocol, frame)
@@ -441,7 +463,7 @@ def _register_write_tools(
         protocol: str,
         host: str,
         port: int,
-        address: int,
+        address: int | str,
         value: int,
         unit: int = 1,
         point_type: str = "register",
@@ -472,7 +494,12 @@ def _register_write_tools(
 
         返回 {"request_frame", "response_frame", "elapsed_ms"}。
         完整请求帧在发送前写入审计日志 (D5: 失败也留痕)。
+
+        EtherNet/IP: address 为 tag 名字符串 (如 "alpha[0]"); values
+        (options.values 或 [value]) 为 16 位字序列, 整数默认 DINT,
+        浮点需显式 options.type="REAL"。
         """
+        _validate_address(protocol, address)
         opts = options or {}
         if point_type not in ("coil", "register"):
             raise ValueError(f"point_type must be 'coil'|'register', got {point_type!r}")

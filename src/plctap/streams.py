@@ -28,6 +28,7 @@ FRAME_HEADER_LEN = {
     "fins": 16,
     "melsec": 11,
     "iec104": 2,
+    "enip": 24,
 }
 
 # 单帧最大长度护栏: 长度字段畸形 (损坏/错协议) 时防缓冲无限膨胀。
@@ -39,6 +40,7 @@ MAX_FRAME_LEN = {
     "fins": 0x4000 + 16,
     "melsec": 0x4000 + 32,
     "iec104": 255,
+    "enip": 0xFFFF + 24,
 }
 
 
@@ -95,6 +97,11 @@ def try_frame_len(protocol: str, buf: bytes) -> int | None:
         if buf[0] != 0x68 or not 4 <= buf[1] <= 253:
             return 0
         total = 2 + buf[1]
+    elif protocol == "enip":
+        (cmd, _len) = struct.unpack_from("<HH", buf, 0)
+        if cmd not in (0x0063, 0x0065, 0x0066, 0x006F, 0x0070):
+            return 0
+        total = 24 + _len
     else:  # fins
         (length,) = struct.unpack_from(">I", buf, 4)
         total = 8 + length

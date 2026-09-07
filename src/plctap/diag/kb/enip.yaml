@@ -1,0 +1,77 @@
+# EtherNet/IP (CIP) 故障知识库 (v0.5.3)
+# 条目经 diagnose 的帧级证据匹配; probe 证据走 failure_class 通用档
+entries:
+- id: enip_enip_status_invalid_session
+  protocol: enip
+  match:
+    field:
+      enip_status:
+      - 100
+  candidate:
+    symptom: ENIP 状态 INVALID_SESSION_HANDLE (0x64)
+    root_cause: 请求头的 session handle 无效 —— 会话已被服务端关闭
+      (空闲超时/重复注册/服务端重启), 客户端仍在用旧句柄发请求
+    suggested_action: 客户端重新 RegisterSession 获取新句柄; 核对两端
+      的会话空闲超时配置 (服务端超时常小于客户端)
+    confidence: 0.9
+    next_tools:
+    - probe_device
+- id: enip_cip_status_path_destination_unknown
+  protocol: enip
+  match:
+    field:
+      cip_status:
+      - 5
+  candidate:
+    symptom: CIP 状态 PATH_DESTINATION_UNKNOWN (0x05)
+    root_cause: tag 名不存在 (拼写/大小写) 或已从控制器删除;
+      Logix 控制器 tag 名不区分大小写, 但结构成员路径 (motor.speed)
+      需要 Controller scope 符号
+    suggested_action: 在 Studio 5000/Controller Tags 里核对 tag 名;
+      数组元素用 alpha[0] 形式 (plctap 支持单维下标)
+    confidence: 0.9
+    next_tools:
+    - plc_read
+- id: enip_cip_status_path_segment_error
+  protocol: enip
+  match:
+    field:
+      cip_status:
+      - 4
+  candidate:
+    symptom: CIP 状态 PATH_SEGMENT_ERROR (0x04)
+    root_cause: tag 路径段编码错误 —— 常见为符号段与元素段混排错误,
+      或请求了本工具未支持的多维数组/结构成员路径
+    suggested_action: 改用一维下标形式 (alpha[0]); 多维/结构成员需拆成
+      多次读或用厂家工具
+    confidence: 0.85
+- id: enip_cip_status_reply_too_large
+  protocol: enip
+  match:
+    field:
+      cip_status:
+      - 15
+  candidate:
+    symptom: CIP 状态 REPLY_TOO_LARGE (0x0F)
+    root_cause: 一次读的元素数太多, 非连接应答超出传输上限
+    suggested_action: 减小 count 分多次读; 大批量采集应建连接
+      (Forward Open) 用连接式传输 (plctap v0.5.3 仅非连接消息)
+    confidence: 0.85
+    next_tools:
+    - plc_read
+- id: enip_probe_no_reply
+  protocol: enip
+  match:
+    failure_class:
+    - connected_but_no_reply
+  candidate:
+    symptom: TCP 可建立但 ENIP 无响应 (ListIdentity/RegisterSession 无应答)
+    root_cause: 端口上服务不是 ENIP (Modbus 网关/私有协议), 或设备对
+      全零 sender context 的请求不响应 —— 部分实现 (cpppo) 的解析器
+      对全零 context 直接失步 (plctap 已改用非零 context 规避)
+    suggested_action: 用 detect_device 复核端口协议; 抓帧对比正常主站
+      报文的 sender context 与帧结构
+    confidence: 0.8
+    next_tools:
+    - detect_device
+    - start_listener
