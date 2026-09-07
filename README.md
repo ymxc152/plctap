@@ -32,7 +32,7 @@
 
 ## 写能力
 
-`PLCTAP_ALLOW_WRITE=true` 后四协议能力:
+`PLCTAP_ALLOW_WRITE=true` 后五端点全部可写 (modbus_rtu 与 modbus 同轨同语义):
 
 | 协议 | 写语义 | options |
 |---|---|---|
@@ -43,34 +43,47 @@
 
 所有写/发送动作逐帧写入审计日志 (发送前留痕, 失败也留)。
 
-## 质量保障
+## 协议速查
 
-- **461 项单测**（codec 纯函数 + 适配器（含 Modbus RTU）+ 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
-- **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
-  pymcprotocol、pypi fins 四个第三方权威实现做真实 socket 交叉验证
-  （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）。
-- **六档评测 39/39**：单帧 / RTU 完整性 / 批量日志 / FINS·MELSEC 专项 / 主动探测归因 / 协议自动识别
-  （detect 档含"回显服务器欺骗"与"证据压过端口先验"两类反例）。
+五个端点的寻址模型与常用参数 (接入前先对表; 工具内 `list_protocols` 亦可动态获取):
 
-## 评测对比 (裸模型基线双跑: 五档 35 用例)
+| 端点 | 默认端口 | 地址语义 | 常用 options |
+|---|---|---|---|
+| `modbus` | 502 | 寄存器地址 **0 基**, count=寄存器数 | `options.function_code`: 3=保持寄存器 (默认), 4=输入寄存器 |
+| `modbus_rtu` | 网关自定义 (常见 502 / 8899) | 同 `modbus` (TCP 上跑裸 RTU 帧, 无 MBAP 头) | 同 `modbus` |
+| `fins` | 9600 | 字地址, count=字数 | `options.area`: CIO/W/H/A/DM/EM (默认 DM) |
+| `melsec` | 44818 (SLMP; 5007 亦常见) | 起始编号, count=点数 (位软元件按 16 点/字) | `options.device`: D/R/W=字, X/Y/B/M=位 (默认 D); `options.frame_format` 4 种 (默认 3e_binary) |
+| `s7` | 102 | **字节**地址, count=**字节数** | `options.area`: DB/M/I/Q (默认 DB); `options.db_number` (默认 1); `rack`/`slot` (默认 0/1, S7-300 槽位通常 2) |
 
-| 档位 | plctap 工具链 | 裸模型直接问答* |
-|---|---|---|
-| 单帧 Modbus TCP | 8/8 | 8/8 |
-| RTU 完整性/CRC | 5/5 | 4/5 |
-| 批量日志 (混排) | 5/5 | 4/5 |
-| FINS/MELSEC 专项 | 12/12 | 5/12 |
-| 主动探测归因 | 5/5 | 5/5 |
-| **合计** | **35/35 (100%)** | **24/35 (68.6%)** |
+`datatype` 支持 uint16 / int16 / float32 / int32; `byteorder` 仅影响 float32 的寄存器对顺序
+(big=ABCD, little=DCBA)。datatype 缺省时返回全部常见类型 × 字序的多解释, 字序存疑时直接比对。
 
-\* 基线方法: 同一批语料, 裸模型 (glm-5.3-flash, 无工具, temperature=0) 直接问答;
-确定性关键词判分 (事实等价集, 双模式共用); 6 例因推理端点超时未获有效答案计 FAIL
-(排除超时后 24/29 = 82.8%)。跑分日期 2026-09-04, 语料版本见 git。
-结论: 单帧翻译裸模型已能胜任, **价值差距集中在冷门协议语义与多故障混排场景** ——
-这正是确定性解析 + 结构化知识库的所在。
-上表为可双跑的五档基线对比; detect 档 (协议自动识别, 4 用例, v0.4 新增) 需要起
-真实网络服务做主动探测, 不适合裸问答形式, 故未纳入基线 —— 工具模式六档合计
-39/39 (见「质量保障」)。
+示例调用 (客户端中按参数填写):
+
+```text
+plc_read(protocol="modbus",     host="10.0.0.10",    port=502,   address=0,   count=2,  datatype="float32", byteorder="big")
+plc_read(protocol="modbus_rtu", host="192.168.1.50", port=8899,  unit=2,      address=100, count=10)
+plc_read(protocol="fins",       host="10.0.0.30",    port=9600,  address=100, count=10, options={"area": "DM"})
+plc_read(protocol="melsec",     host="10.0.0.40",    port=44818, address=100, count=10, options={"device": "D"})
+plc_read(protocol="s7",         host="10.0.0.20",    port=102,   address=0,   count=4,  datatype="float32", options={"area": "DB", "db_number": 1})
+```
+
+`modbus` 与 `modbus_rtu` 怎么选: 网关/上位机已封装 MBAP 头 (标准 Modbus TCP) → `modbus`;
+串口服务器或网关工作在 RTU 透传模式 (TCP 上是裸 RTU 帧) → `modbus_rtu`。
+
+## 典型工作流 (现场诊断)
+
+1. `detect_device(host=...)` — 不知道对面是什么: 并发探测标准端口, 按响应指纹判定协议/端口/置信度,
+   返回可直接执行的 `plc_read` 建议 (全程只读)。
+2. `probe_device(protocol, host, port)` — 连通性确认; 失败时四类分层归因
+   (connection_refused / timeout / connected_but_no_reply / exception_response),
+   直接告诉您该查网络路由还是查协议配置。
+3. `plc_read(...)` — 按「协议速查」读数, 与上位机显示或预期值比对。
+4. 读数不对 / 通信故障 → 抓包帧喂 `parse_frame` / `validate_frame` 做结构化解析与规范校验;
+   日志文本喂 `diagnose` 得到带证据链的结构化候选结论。
+5. 要看上位机 ↔ PLC 全部交互 → `start_proxy` 透明代理 (上位机改指向代理即可, 免 Wireshark);
+   设备只能当 client 主动外连 → `start_listener` 假 server 钓帧, 支持 `inject_errors`
+   故障注入档做上位机容错回归。
 
 ## 快速开始
 
@@ -127,7 +140,7 @@ PLCTAP_DEFAULT_TIMEOUT_MS = "2000"
 | `PLCTAP_ALLOW_WRITE` | `false` | **写类工具默认不注册** (安全闸门) |
 | `PLCTAP_POOL_MAX_PER_TARGET` | `2` | 每目标连接池上限 |
 | `PLCTAP_IDLE_TIMEOUT_SEC` | `30` | 空闲连接回收秒数 |
-| `PLCTAP_DEFAULT_TIMEOUT_MS` | `2000` | 网络超时 |
+| `PLCTAP_DEFAULT_TIMEOUT_MS` | `2000` | 网络超时 (串口网关 / 远程站点等慢链路可调大) |
 | `PLCTAP_AUDIT_LOG` | `~/.plctap/audit.jsonl` | 审计日志路径 (写/发送动作逐帧留痕) |
 
 ## 安全
@@ -145,6 +158,37 @@ uv sync --extra eval --group e2e
 uv run pytest -q   # 单测 (codec/适配器/诊断/监听) + 跨厂商 e2e + MCP 冒烟
 uv run plctap      # 本地启动 stdio server
 ```
+
+## 质量保障
+
+- **461 项单测**（codec 纯函数 + 适配器（含 Modbus RTU）+ 诊断引擎 + 监听器 + 透明代理 + detect_device），CI 每次推送回归。
+- **跨厂商 e2e**（[tests/e2e](tests/e2e/test_cross_vendor.py)）：plctap 与 pymodbus、python-snap7、
+  pymcprotocol、pypi fins 四个第三方权威实现做真实 socket 交叉验证
+  （读写闭环、读数逐值比对、钓鱼监听互通），CI 随行（`uv sync --group e2e`）。
+- **六档评测 39/39**：单帧 / RTU 完整性 / 批量日志 / FINS·MELSEC 专项 / 主动探测归因 / 协议自动识别
+  （detect 档含"回显服务器欺骗"与"证据压过端口先验"两类反例）；与裸模型的双跑对比见下节。
+
+## 评测对比 (裸模型基线双跑: 五档 35 用例)
+
+| 档位 | plctap 工具链 | 裸模型直接问答* |
+|---|---|---|
+| 单帧 Modbus TCP | 8/8 | 8/8 |
+| RTU 完整性/CRC | 5/5 | 4/5 |
+| 批量日志 (混排) | 5/5 | 3/5 |
+| FINS/MELSEC 专项 | 12/12 | 5/12 |
+| 主动探测归因 | 5/5 | 4/5 |
+| **合计** | **35/35 (100%)** | **24/35 (68.6%)** |
+
+\* 同一批语料双跑, 除工具外一切相同: 裸模型 (glm-5.3-flash, 无工具, temperature=0) 直接问答;
+确定性关键词判分 (事实等价集, 双模式共用); 6 例因推理端点超时未获有效答案计 FAIL
+(排除超时后 24/29 = 82.8%)。裸模型跑分日期 2026-09-04, 语料版本 7cd6d14 (跑分时点;
+fins 语料其后于 7608f47 随线上格式修正同步更新, 判分语义不变)。
+**范围说明**: 语料建于 M2 (v0.2 时代), 覆盖帧解析 / CRC 完整性 / 日志混排 / 冷门协议语义 /
+主动探测归因; v0.3+ 功能 (plc_write / parse_pcap / 透明代理 / modbus_rtu 端点 / vendor_hints)
+未纳入基线。detect 档 (协议自动识别, 4 用例, v0.4 新增) 需要起真实网络服务做主动探测,
+不适合裸问答形式, 故未纳入对比 —— 工具模式六档合计 39/39 (2026-09-07 按当前语料复跑)。
+结论: 单帧翻译裸模型已能胜任, **价值差距集中在冷门协议语义与多故障混排场景** ——
+这正是确定性解析 + 结构化知识库的所在。方法学与复跑步骤见 [eval/README.md](eval/README.md)。
 
 ## License
 

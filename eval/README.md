@@ -33,14 +33,21 @@ uv run python eval/baseline.py --answers answers.jsonl
 
 输出: 分档准确率 + `eval/results_baseline.json` (README 对比表数据源)。
 
-## 已发布结果 (2026-09-04)
+## 已发布结果 (裸模型跑分 2026-09-04, 语料版本 7cd6d14)
 
 - 基线: glm-5.3-flash @ 本地 Responses 兼容端点, temperature 0
-- 工具 35/35 vs 裸模型 24/35; 分档: 8/8, 4/5, 4/5, 5/12, 5/5
+- 工具 35/35 vs 裸模型 24/35; 分档: 8/8, 4/5, 3/5, 5/12, 4/5
+  (single_frame / integrity_crc / batch_log / fins_melsec / active_probe)
 - 6 例端点超时计 FAIL (披露于 README); 判分关键词为事实等价集 (| 语法),
   benchmark/baseline 两处实现已同步
+- fins 语料其后于 7608f47 (v0.2.0) 随 MELSEC 线上格式修正同步更新 (帧输入与判分
+  关键词, 判分语义不变); 工具模式 2026-09-07 按当前语料复跑 39/39
 - v0.4 (2026-09-07): 新增 detect 档 4 例 (`corpus/detect.yaml`, 进程内假设备),
   工具模式六档合计 39/39; detect 档需起真实网络服务做主动探测, 无裸问答基线
+- **范围**: 语料建于 M2 (v0.2 时代); v0.3+ 功能 (plc_write / parse_pcap /
+  透明代理 / modbus_rtu 端点 / vendor_hints) 未纳入基线
+- `results_baseline.json` 为生成物 (已 gitignore, 可按上文步骤再生);
+  README 对比表数字以本节为准
 
 ## README 对比表纪律 (M3)
 
