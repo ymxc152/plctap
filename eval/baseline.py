@@ -72,18 +72,29 @@ def parse_model_output(raw: str) -> list[dict[str, Any]] | None:
 
 
 def call_model(prompt: str, model: str, timeout: int = 180) -> str:
-    """Responses API (stdlib 调用, 不引入依赖)。
+    """裸模型调用: 方言由 PLCTAP_BASELINE_API 选择 (responses | chat, 缺省 responses)。
 
-    支持 OpenAI 官方或任意兼容端点:
-      PLCTAP_BASELINE_BASE_URL  默认 https://api.openai.com/v1
+    两种方言均支持 OpenAI 官方或任意兼容端点:
+      PLCTAP_BASELINE_BASE_URL  缺省 https://api.openai.com/v1
       OPENAI_API_KEY            鉴权 key
+      PLCTAP_BASELINE_TIMEOUT   单题超时秒 (缺省 180; 推理模型难题可达数百秒)
+    - responses: OpenAI Responses API `{base}/responses`, {"model", "input"} (原实现)
+    - chat:      OpenAI 兼容 chat/completions `{base}/chat/completions`
+                 (火山方舟 Ark 等国内端点)。注意 Ark 的 /responses 兼容层对
+                 部分 reasoning 模型 (deepseek/glm) 有坑: effort=minimal/low
+                 会秒回退化 "[]" 或超长思考超时, chat 方言 + 默认思考实测正常
+                 (2026-09-08 实证), 思考开启与旧基线口径一致, 超时计 FAIL 披露。
     部分兼容端点不接受 temperature —— 400 时自动去参重试。
     """
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
         raise SystemExit("OPENAI_API_KEY not set")
     base = os.environ.get("PLCTAP_BASELINE_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    url = f"{base}/responses"
+    api = os.environ.get("PLCTAP_BASELINE_API", "responses")
+    if api == "chat":
+        url = f"{base}/chat/completions"
+    else:
+        url = f"{base}/responses"
 
     def _post(body_dict: dict[str, Any]) -> dict[str, Any]:
         req = urllib.request.Request(
@@ -94,13 +105,25 @@ def call_model(prompt: str, model: str, timeout: int = 180) -> str:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
 
+    if api == "chat":
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+        }
+    else:
+        body = {"model": model, "input": prompt, "temperature": 0}
     try:
-        data = _post({"model": model, "input": prompt, "temperature": 0})
+        data = _post(body)
     except urllib.error.HTTPError as e:
-        if e.code == 400:  # 兼容端点可能不支持 temperature
-            data = _post({"model": model, "input": prompt})
+        if e.code == 400:  # 兼容端点可能不支持 temperature —— 去参重试
+            body.pop("temperature", None)
+            data = _post(body)
         else:
             raise
+    if api == "chat":
+        choices = data.get("choices") or [{}]
+        return (choices[0].get("message") or {}).get("content") or ""
     if data.get("output_text"):
         return data["output_text"]
     # 兼容无 output_text 快捷字段的实现: 从 output 数组提取文本
@@ -143,14 +166,15 @@ def main() -> int:
         print(f"offline mode: {len(answers)} pre-recorded answers")
     else:
         model = os.environ.get("PLCTAP_BASELINE_MODEL", "gpt-4.1-mini")
-        print(f"baseline model: {model} @ {os.environ.get('PLCTAP_BASELINE_BASE_URL', 'https://api.openai.com/v1')}")
+        timeout_s = int(os.environ.get("PLCTAP_BASELINE_TIMEOUT", "180"))
+        print(f"baseline model: {model} @ {os.environ.get('PLCTAP_BASELINE_BASE_URL', 'https://api.openai.com/v1')} (api={os.environ.get('PLCTAP_BASELINE_API', 'responses')}, timeout={timeout_s}s)")
         for rec in records:
             if rec["id"] in answers:
                 continue
             t0 = time.time()
             for attempt in (1, 2):  # 网络超时重试一次
                 try:
-                    answers[rec["id"]] = call_model(rec["prompt"], model)
+                    answers[rec["id"]] = call_model(rec["prompt"], model, timeout=timeout_s)
                     print(f"  {rec['id']}: {time.time()-t0:.1f}s (attempt {attempt})", flush=True)
                     time.sleep(1.0)  # 温和限速
                     break
