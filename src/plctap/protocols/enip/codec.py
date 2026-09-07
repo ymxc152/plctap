@@ -101,6 +101,8 @@ def parse_register_session_response(frame: bytes) -> int:
         raise ValueError(f"not a RegisterSession response: {command:#06x}")
     if status != 0:
         raise ValueError(f"RegisterSession failed: {ENIP_STATUS.get(status, f'{status:#x}')}")
+    if len(frame) < off + 4:
+        raise ValueError(f"register session payload truncated: {len(frame) - off} < 4 bytes")
     version, options = struct.unpack_from("<HH", frame, off)
     if version != 1:
         raise ValueError(f"unsupported encapsulation protocol version {version}")
@@ -122,6 +124,10 @@ def parse_identity_payload(payload: bytes) -> dict:
         info["item_len"] = item_len
         return info
     body = payload[4:4 + item_len]
+    if len(body) < 35:
+        # 身份体最小可读长度: encap2 + sockaddr16 + vendor4 + type/code4 + revision2
+        # + status2 + serial4 + name_len1 = 35B; 截断转 ValueError (调用方收进 errors)
+        raise ValueError(f"identity body truncated: {len(body)} < 35 bytes")
     off = 0
     (info["encap_version"],) = struct.unpack_from("<H", body, off); off += 2
     off += 16  # sockaddr (family/port/addr/zero) —— 身份定位用, 不解语义
@@ -141,6 +147,8 @@ def parse_list_identity_response(frame: bytes) -> dict:
         raise ValueError(f"not a ListIdentity response: {command:#06x}")
     if status != 0:
         raise ValueError(f"ListIdentity failed: {ENIP_STATUS.get(status, f'{status:#x}')}")
+    if len(frame) < off + 2:
+        raise ValueError(f"identity item count truncated: {len(frame) - off} < 2 bytes")
     (item_count,) = struct.unpack_from("<H", frame, off)
     info = parse_identity_payload(frame[off + 2:])
     info["item_count"] = item_count
@@ -293,6 +301,10 @@ def parse_tag_reply(cip: bytes, service: int) -> ParseResult:
                      f"request {service:#04x}" if reply_service == (service | 0x80) else "service mismatch"))
     fields.append(_f(cip, "cip_status", status, 2, 1, CIP_STATUS.get(status, f"UNKNOWN_CIP_{status:#04x}")))
     if addl_size:
+        if len(cip) < 4 + addl_size * 2:
+            raise ValueError(
+                f"additional status truncated: need {4 + addl_size * 2} bytes, have {len(cip)}"
+            )
         addl = struct.unpack_from(f"<{addl_size}H", cip, 4)
         fields.append(_f(cip, "additional_status", list(addl), 4, addl_size * 2))
     if reply_service != (service | 0x80):
@@ -337,10 +349,14 @@ def parse_cip_reply_from_rrdata(frame: bytes) -> tuple[bytes, ParseResult]:
     if item_count != 2:
         raise ValueError(f"expected 2 items in RRData, got {item_count}")
     off2 = off + 8  # iface4 + timeout2 + itemcount2
+    if len(frame) < off2 + 4:
+        raise ValueError(f"address item truncated: need 4B header at offset {off2}")
     addr_type, addr_len = struct.unpack_from("<HH", frame, off2)
     if addr_type != ITEM_ADDRESS_NULL:
         raise ValueError(f"expected null address item, got {addr_type:#06x}")
     off2 += 4 + addr_len
+    if len(frame) < off2 + 4:
+        raise ValueError(f"data item header truncated: need 4B at offset {off2}")
     data_type, data_len = struct.unpack_from("<HH", frame, off2)
     if data_type != ITEM_CIP_UNCONNECTED_REPLY:
         raise ValueError(f"expected unconnected reply item 0x00B1, got {data_type:#06x}")
@@ -368,6 +384,9 @@ def parse_request(frame: bytes) -> ParseResult:
     fields.append(_f(frame, "payload_length", length, 2, 2))
     fields.append(_f(frame, "session_handle", session, 4, 4))
     if command == CMD_REGISTER_SESSION:
+        if len(frame) < off + 4:
+            errors.append(f"register session payload truncated: {len(frame) - off} < 4 bytes")
+            return ParseResult(protocol="enip", direction="req", fields=fields, valid=False, errors=errors)
         version, options = struct.unpack_from("<HH", frame, off)
         fields.append(_f(frame, "protocol_version", version, off, 2))
         fields.append(_f(frame, "options", options, off + 2, 2))
@@ -375,28 +394,43 @@ def parse_request(frame: bytes) -> ParseResult:
     if command == CMD_LIST_IDENTITY:
         return ParseResult(protocol="enip", direction="req", fields=fields, valid=True, errors=[])
     if command == CMD_SEND_RR_DATA:
+        # RRData 项结构逐段解: 载荷截断转 errors, 不抛 struct.error
+        if len(frame) < off + 8:
+            errors.append(f"rrdata payload truncated: {len(frame) - off} < 8 bytes (iface+timeout+item_count)")
+            return ParseResult(protocol="enip", direction="req", fields=fields, valid=False, errors=errors)
         (_iface,) = struct.unpack_from("<I", frame, off)
         (_timeout, item_count) = struct.unpack_from("<HH", frame, off + 4)
         fields.append(_f(frame, "item_count", item_count, off + 6, 2))
         off2 = off + 8  # iface4 + timeout2 + itemcount2
+        if len(frame) < off2 + 4:
+            errors.append(f"address item truncated: need 4B header at offset {off2}")
+            return ParseResult(protocol="enip", direction="req", fields=fields, valid=False, errors=errors)
         addr_type, addr_len = struct.unpack_from("<HH", frame, off2)
         off2 += 4 + addr_len
+        if len(frame) < off2 + 4:
+            errors.append(f"data item header truncated: need 4B at offset {off2}")
+            return ParseResult(protocol="enip", direction="req", fields=fields, valid=False, errors=errors)
         data_type, data_len = struct.unpack_from("<HH", frame, off2)
         off2 += 4
         fields.append(_f(frame, "data_item_type", data_type, off2 - 4, 2))
         cip = frame[off2:off2 + data_len]
-        if data_len and cip[0] == SVC_UNCONNECTED_SEND:
+        if len(cip) < data_len:
+            errors.append(f"data item truncated: have {len(cip)}, need {data_len}")
+        if data_len and len(cip) >= 3 and cip[0] == SVC_UNCONNECTED_SEND:
             (_elen,) = struct.unpack_from("<H", cip, 1)
             embedded = cip[3:3 + _elen]
-            fields.append(_f(frame, "embedded_service", embedded[0], off2 + 4, 1,
-                             f"Read Tag" if embedded[0] == SVC_READ_TAG else
-                             f"Write Tag" if embedded[0] == SVC_WRITE_TAG else f"{embedded[0]:#04x}"))
-            fields.append(_f(frame, "route_path", cip[3 + _elen:], off2 + 3 + _elen,
-                             len(cip) - 3 - _elen, "背板 1 / 槽 0"))
-            # 请求侧: 嵌入服务 = 读/写 tag, 解路径与参数
-            fields.extend(_parse_embedded_request(frame, embedded, off2 + 4))
+            if not embedded:
+                errors.append(f"embedded request truncated: have 0, need {_elen}")
+            else:
+                fields.append(_f(frame, "embedded_service", embedded[0], off2 + 4, 1,
+                                 f"Read Tag" if embedded[0] == SVC_READ_TAG else
+                                 f"Write Tag" if embedded[0] == SVC_WRITE_TAG else f"{embedded[0]:#04x}"))
+                fields.append(_f(frame, "route_path", cip[3 + _elen:], off2 + 3 + _elen,
+                                 len(cip) - 3 - _elen, "背板 1 / 槽 0"))
+                # 请求侧: 嵌入服务 = 读/写 tag, 解路径与参数
+                fields.extend(_parse_embedded_request(frame, embedded, off2 + 4))
             return ParseResult(protocol="enip", direction="req", fields=fields, valid=not errors, errors=errors)
-        return ParseResult(protocol="enip", direction="req", fields=fields, valid=True, errors=errors)
+        return ParseResult(protocol="enip", direction="req", fields=fields, valid=not errors, errors=errors)
     return ParseResult(protocol="enip", direction="req", fields=fields, valid=True, errors=errors)
 
 
@@ -407,17 +441,19 @@ def _parse_embedded_request(frame: bytes, embedded: bytes, base_offset: int) -> 
     off = 1
     if service not in (SVC_READ_TAG, SVC_WRITE_TAG):
         return fields
+    if len(embedded) < 2:
+        return fields  # 嵌入请求截断: 无路径字长可读
     path_words = embedded[off]  # 路径长度以字 (16 位) 计
     off += 1
     path = embedded[off:off + path_words * 2]
     off += path_words * 2
     # 符号段: 0x91 + len + ascii(补齐)
-    if path and path[0] == 0x91:
+    if len(path) >= 2 and path[0] == 0x91:
         name_len = path[1]
         name = path[2:2 + name_len].decode("ascii", errors="replace")
         fields.append(_f(frame, "tag_name", name, base_offset + off, name_len))
         rest = path[2 + name_len + (name_len % 2):]  # 跳过符号补齐字节
-        if rest and rest[0] == 0x28:
+        if len(rest) >= 2 and rest[0] == 0x28:
             fields.append(_f(frame, "element_index", rest[1], base_offset + off + 2 + name_len, 1))
     if service == SVC_READ_TAG and off + 2 <= len(embedded):
         (count,) = struct.unpack_from("<H", embedded, off)

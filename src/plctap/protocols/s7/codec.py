@@ -400,6 +400,10 @@ def parse_request(frame: bytes) -> ParseResult:
             d = frame[offset:]
             if len(d) < data_len:
                 errors.append(f"write data truncated: have {len(d)}, need {data_len}")
+            elif len(d) < 4:
+                # 写数据项头 (return_code + transport_size + bit 长度 2B) 需 4B;
+                # data_len∈1..3 且尾部恰好等长时按截断转 errors, 不越界读
+                errors.append(f"write data header truncated: have {len(d)}, need 4")
             else:
                 wd_ts = d[1]
                 (bits,) = struct.unpack_from(">H", d, 2)

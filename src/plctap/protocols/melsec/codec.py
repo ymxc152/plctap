@@ -141,6 +141,14 @@ def _dec_ascii(data: bytes) -> int:
     return int(data.decode("ascii"), 16)
 
 
+def _try_hex(data: bytes) -> int | None:
+    """ASCII hex 解码; 非 hex/非 ASCII 返回 None (校验清单转失败项, 不抛)。"""
+    try:
+        return _dec_ascii(data)
+    except ValueError:  # 含 UnicodeDecodeError
+        return None
+
+
 def header_len(frame_format: str = FRAME_3E_BINARY) -> int:
     return _HEADER_LENS[frame_format]
 
@@ -470,10 +478,16 @@ def parse_request_fmt(frame: bytes, frame_format: str = FRAME_3E_BINARY) -> Pars
     data = frame[hl:]
     if data_len != _tail_bytes(frame, frame_format):
         errors.append(f"data_length {data_len} != timer+data bytes {_tail_bytes(frame, frame_format)}")
-    if len(data) < 4:
-        errors.append("request data too short for command+subcommand")
+    pdu_len = _pdu_ascii_len(frame_format)
+    if len(data) < pdu_len:
+        # 软元件块不足 (binary 10B / ascii 20 字符): 截断帧转 errors, 不越界读
+        errors.append(f"request data too short for device block: {len(data)} < {pdu_len}")
         return ParseResult(protocol="melsec", direction="req", fields=fields, valid=False, errors=errors)
-    cmd, subcmd, code, head, count = _decode_pdu(frame_format, data)
+    try:
+        cmd, subcmd, code, head, count = _decode_pdu(frame_format, data)
+    except ValueError as e:  # ASCII 帧软元件区含非 hex/非 ASCII 字符
+        errors.append(f"device block undecodable: {e}")
+        return ParseResult(protocol="melsec", direction="req", fields=fields, valid=False, errors=errors)
     fields.append(_field(frame, "command", cmd, hl, 4 if _is_ascii(frame_format) else 2))
     fields.append(_field(frame, "subcommand", subcmd, hl + (4 if _is_ascii(frame_format) else 2), 4 if _is_ascii(frame_format) else 2))
     if cmd not in (CMD_BATCH_READ_WORD, CMD_BATCH_WRITE_WORD):
@@ -525,7 +539,11 @@ def parse_response_fmt(frame: bytes, request: bytes | None = None, frame_format:
             errors.append(f"nonzero end code but {len(data) - _sz} trailing data bytes present")
         return ParseResult(protocol="melsec", direction="resp", fields=fields, valid=not errors, errors=errors)
     values_raw = data
-    values = _decode_word_values(frame_format, values_raw)
+    try:
+        values = _decode_word_values(frame_format, values_raw)
+    except ValueError as e:  # ASCII 字值区含非 hex 字符: 截断/污染转证据
+        errors.append(f"word values undecodable: {e}")
+        return ParseResult(protocol="melsec", direction="resp", fields=fields, valid=False, errors=errors)
     fields.append(
         _field(frame, "word_values", values, _DATA_START_OFFSETS[frame_format], len(values_raw),
                "16-bit 小端字值" if not _is_ascii(frame_format) else "16-bit ASCII hex 字值")
@@ -564,37 +582,66 @@ def validate_frame_fmt(frame: bytes, direction: str = "resp", frame_format: str 
     ))
     if len(frame) < (4 if _is_ascii(frame_format) else 2):
         return checks
-    sub = _dec_ascii(frame[0:4]) if _is_ascii(frame_format) else struct.unpack_from(">H", frame, 0)[0]
     expected_sub = _REQ_SUBHEADERS[frame_format] if direction == "req" else _RESP_SUBHEADERS[frame_format]
-    sub_ok = sub == expected_sub
+    if _is_ascii(frame_format):
+        sub = _try_hex(frame[0:4])
+        sub_detail = (
+            f"subheader not ASCII hex: {frame[0:4].decode('ascii', errors='replace')!r}"
+            if sub is None
+            else f"subheader={sub:#06x} (expect {expected_sub:#06x} for {frame_format} {direction})"
+        )
+    else:
+        sub = struct.unpack_from(">H", frame, 0)[0]
+        sub_detail = f"subheader={sub:#06x} (expect {expected_sub:#06x} for {frame_format} {direction})"
+    sub_ok = sub is not None and sub == expected_sub
     checks.append(CheckResult(
         name=f"subheader_{frame_format}",
         passed=sub_ok,
-        detail=f"subheader={sub:#06x} (expect {expected_sub:#06x} for {frame_format} {direction})",
+        detail=sub_detail,
     ))
     checks.append(CheckResult(
         name="subheader_match",
         passed=sub_ok,
-        detail=f"subheader={sub:#06x} (expect {expected_sub:#06x} for {frame_format} {direction})",
+        detail=sub_detail,
     ))
     fld_sz = 4 if _is_ascii(frame_format) else 2
     if len(frame) < dl_off + fld_sz:
         return checks
-    data_len = _dec_ascii(frame[dl_off : dl_off + fld_sz]) if _is_ascii(frame_format) else struct.unpack_from("<H", frame, dl_off)[0]
-    actual_tail = _tail_bytes(frame, frame_format)
-    checks.append(CheckResult(
-        name="data_length_consistent",
-        passed=data_len == actual_tail,
-        detail=f"data_length={data_len}, actual tail bytes={actual_tail}",
-    ))
+    if _is_ascii(frame_format):
+        dl_raw = frame[dl_off : dl_off + fld_sz]
+        data_len = _try_hex(dl_raw)
+        if data_len is None:
+            checks.append(CheckResult(
+                name="data_length_consistent", passed=False,
+                detail=f"data_length not ASCII hex: {dl_raw.decode('ascii', errors='replace')!r}",
+            ))
+    else:
+        data_len = struct.unpack_from("<H", frame, dl_off)[0]
+    if data_len is not None:
+        actual_tail = _tail_bytes(frame, frame_format)
+        checks.append(CheckResult(
+            name="data_length_consistent",
+            passed=data_len == actual_tail,
+            detail=f"data_length={data_len}, actual tail bytes={actual_tail}",
+        ))
     end_off = _END_OFFSETS[frame_format]
     if direction == "resp" and len(frame) >= end_off + 2:
-        end_code = _decode_end_code(frame_format, frame[end_off:])
-        checks.append(CheckResult(
-            name="end_code_known",
-            passed=end_code in END_CODES,
-            detail=f"end_code={end_code:#06x} ({end_code_name(end_code)})",
-        ))
+        if _is_ascii(frame_format):
+            end_raw = frame[end_off:end_off + 4]
+            end_code = _try_hex(end_raw)
+            if end_code is None:
+                checks.append(CheckResult(
+                    name="end_code_known", passed=False,
+                    detail=f"end_code not ASCII hex: {end_raw.decode('ascii', errors='replace')!r}",
+                ))
+        else:
+            end_code = struct.unpack_from("<H", frame, end_off)[0]
+        if end_code is not None:
+            checks.append(CheckResult(
+                name="end_code_known",
+                passed=end_code in END_CODES,
+                detail=f"end_code={end_code:#06x} ({end_code_name(end_code)})",
+            ))
     if direction == "req" and len(frame) >= hl + 2:
         try:
             cmd, _subcmd, _code, _head, _count = _decode_pdu(frame_format, frame[hl:])

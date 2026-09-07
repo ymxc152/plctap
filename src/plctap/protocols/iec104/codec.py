@@ -377,13 +377,17 @@ def parse_frame(frame: bytes, direction: Literal["req", "resp", "auto"] = "auto"
         asdu = parse_asdu(frame, APCI_LEN, apdu_len - 4)
         fields.extend(asdu.fields)
         errors.extend(asdu.errors)
-        if direction == "auto" and len(frame) > 9:
-            t, cot = frame[6], frame[8]
-            if t in MONITOR_TYPES:
-                direction = "resp"
-            elif t in (45, 46, 47, 48, 100, 102, 103, 104):
-                direction = "resp" if cot in (7, 9, 10) else "req"
+        if direction == "auto":
+            if len(frame) >= 9:
+                t, cot = frame[6], frame[8]
+                if t in MONITOR_TYPES:
+                    direction = "resp"
+                elif t in (45, 46, 47, 48, 100, 102, 103, 104):
+                    direction = "resp" if cot in (7, 9, 10) else "req"
+                else:
+                    direction = "resp"
             else:
+                # ASDU 截断读不出 type/cot: 按监视方向兜底 (与未知 type 一致), 截断已在 errors 留证
                 direction = "resp"
         return ParseResult(protocol="iec104", direction=direction, fields=fields,
                            valid=not errors, errors=errors)
@@ -393,6 +397,9 @@ def parse_frame(frame: bytes, direction: Literal["req", "resp", "auto"] = "auto"
                            valid=not errors, errors=errors)
     fn = control[0]
     fields.append(_field(frame, "u_function", fn, 2, 1, U_FUNCTION_NAMES.get(fn, f"UNKNOWN_U_{fn:#04x}")))
+    if fn not in U_FUNCTION_NAMES:
+        # 未知 U 功能码: 方向按主站主动发起兜底 (req), 真实功能码留 raw_hex/note 证据
+        errors.append(f"unknown U-function {fn:#04x}")
     return ParseResult(protocol="iec104", direction="req", fields=fields,
                        valid=not errors and len(frame) == 6, errors=errors
                        + ([] if len(frame) == 6 else [f"U-format frame must be 6 bytes, got {len(frame)}"]))

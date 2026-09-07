@@ -2,8 +2,8 @@
 """hypothesis 模糊测试: 喂随机与变异字节给 parse/validate 纯函数层 (v0.6 batch1)。
 
 性质契约 ("畸形帧是诊断证据, 不是异常"):
-  1. 恒不崩: 除 KNOWN_RAISES 白名单 (文档化契约 + 已登记缺陷) 外, 任意字节
-     序列喂给任一 parse/validate 纯函数入口都不允许抛异常;
+  1. 恒不崩: 除 KNOWN_RAISES 白名单 (仅文档化契约) 外, 任意字节序列喂给
+     任一 parse/validate 纯函数入口都不允许抛异常;
   2. 恒结构化: 正常返回必须是良构 ParseResult (valid == (not errors)) 或
      list[CheckResult] (每项 name 非空 / passed 为 bool)。
 
@@ -18,11 +18,10 @@ profile (settings.register_profile):
     derandomize=False —— 本地浸泡, 每次探索新路径 (炸出新崩溃按报告归档)。
   deadline=None: Windows 计时抖动, 不做单例时限。
 
-KNOWN_RAISES 白名单分两类 (修复 src 后应同步删除对应条目并收紧):
-  - 文档化契约: s7.parse_request 对 <17B 抛 ValueError (docstring 明示
-    "畸形帧不抛错 (除无法定位 S7 头外)");
-  - 本轮 fuzz 发现的缺陷: 机制见各条注释, 最小复现钉在
-    test_known_crash_signatures_pinned (修复后该测试依旧全绿)。
+KNOWN_RAISES 白名单只允许文档化契约 (docstring 明示的异常):
+  s7.parse_request 对 <17B 帧抛 ValueError。首轮 fuzz 登记的 7 处缺陷已于
+  v0.6 修复并移出白名单, 最小复现帧固化为显式回归断言:
+  test_former_defect_frames_now_structured (断言具体 errors 内容而非只不炸)。
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ import struct
 
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
-from pydantic import ValidationError
 
 from plctap.models import CheckResult, ParseResult
 from plctap.protocols.auto import parse_auto
@@ -75,31 +73,12 @@ _FUZZ_PROFILE = _load_fuzz_profile()
 # ---------------------------------------------------------------- 已知异常白名单
 
 # key = 纯函数入口标签 (与 _call 的 label 一致), value = 允许抛出的异常类型。
-# 未登记的入口一律不许抛 (strict); 修复 src 后删除对应条目即可收紧。
+# 仅保留文档化契约 (docstring 明示的异常); 缺陷类条目已随 v0.6 修复全部移除 ——
+# 新增条目必须注明出处, 且优先修 src 而不是扩白名单。
 KNOWN_RAISES: dict[str, tuple[type[BaseException], ...]] = {
-    # 文档化契约: <17B 抛 ValueError ("除无法定位 S7 头外", docstring 明示)。
-    # 另含本轮 fuzz 发现的写数据区缺陷 (修复后可删): FUNC_WRITE_VAR 且
-    # data_len∈1..3、尾部数据恰好等长时 -> d[1] IndexError / unpack_from struct.error。
-    "s7.parse_request": (ValueError, struct.error, IndexError),
-    # 缺陷: binary 请求 data 恰 4~7B 时 _decode_pdu 的 data[7] 越界 -> IndexError;
-    #       ASCII 请求 PDU 区非 hex/非 ASCII 字符时 _dec_ascii/.decode -> ValueError
-    #       (UnicodeDecodeError 是 ValueError 子类, 一并覆盖)。
-    "melsec.parse_request_fmt": (ValueError, IndexError),
-    # 缺陷: ASCII 响应端结码为 0 且尾部字值区非 hex 时 _decode_word_values -> ValueError。
-    "melsec.parse_response_fmt": (ValueError,),
-    # 缺陷: ASCII 格式 sub/data_length/end_code 字段非 hex 时 _dec_ascii -> ValueError。
-    "melsec.validate_frame_fmt": (ValueError,),
-    # 缺陷: U 格式功能码不认识 (非 STARTDT/STOPDT/TESTFR) 时 direction 保持 "auto",
-    #       ParseResult(direction="auto") 被 pydantic Literal 拒绝 -> ValidationError。
-    "iec104.parse_frame": (ValidationError,),
-    # 缺陷: ListIdentity/SendRRData 载荷截断到 item 边界之前时
-    #       struct.unpack_from 越界 -> struct.error。
-    "enip.parse_request": (struct.error,),
-    "enip.parse_response": (struct.error,),
-    # parse_auto 内部分派到上述入口, 继承同一组白名单。
-    "parse_auto[melsec]": (ValueError, IndexError),
-    "parse_auto[iec104]": (ValidationError,),
-    "parse_auto[enip]": (struct.error,),
+    # 文档化契约: s7.parse_request 对 <17B 帧抛 ValueError
+    # (docstring 明示 "畸形帧不抛错 (除无法定位 S7 头外)")。
+    "s7.parse_request": (ValueError,),
 }
 
 
@@ -455,50 +434,95 @@ class TestParseAutoFuzz:
             parse_auto("modbus_rtu", b"\x01\x03\x00\x00\x00\x01\x84\xf5")
 
 
-# ---------------------------------------------------------------- 已知崩溃签名回归钉
+# ---------------------------------------------------------------- 已修复缺陷的显式回归
 
 
-def test_known_crash_signatures_pinned():
-    """本轮 fuzz 命中的已知缺陷最小复现帧 (可执行清单, 供修复后回归)。
+def test_former_defect_frames_now_structured():
+    """v0.6 fuzz 命中并已修复的缺陷最小复现帧: 逐帧断言结构化结果与具体 errors 内容。
 
-    每条钉两层: ① 白名单外不许抛 (白名单扩大必须显式改 KNOWN_RAISES);
-    ② 修复后返回良构结构化结果, 本测试依旧全绿 —— 届时删除白名单条目。
+    这些帧曾经让 codec 抛 IndexError/ValueError/struct.error/ValidationError
+    (机制见各断言注释); 修复后必须返回 valid=False 的结构化证据, 而不只是不炸。
     """
-    pins: list[tuple[str, object, bytes]] = [
-        # melsec 3E binary 请求: data 恰 5B (4<=len<8) -> _decode_pdu data[7] IndexError
-        ("melsec.parse_request_fmt",
-         lambda f: melsec_codec.parse_request_fmt(f, "3e_binary"),
-         bytes.fromhex("500000000000000000000001020304")),
-        # melsec 3E ASCII 请求: 头部合法 hex + PDU 区 'ZZZZZZZZ' -> _dec_ascii ValueError
-        ("melsec.parse_request_fmt",
-         lambda f: melsec_codec.parse_request_fmt(f, "3e_ascii"),
-         "500000FF03FF0000100004ZZZZZZZZ".encode("ascii")),
-        # melsec 3E ASCII 响应: 端结码 0 + 字值区 'ZZZZ' -> _decode_word_values ValueError
-        ("melsec.parse_response_fmt",
-         lambda f: melsec_codec.parse_response_fmt(f, frame_format="3e_ascii"),
-         "D00000FF03FF00000C0000ZZZZ".encode("ascii")),
-        # melsec 3E ASCII 校验: data_length 字段 'ZZZZ' -> ValueError; 非 ASCII 头 -> UnicodeDecodeError
-        ("melsec.validate_frame_fmt",
-         lambda f: melsec_codec.validate_frame_fmt(f, "req", frame_format="3e_ascii"),
-         "500000FF03FF00ZZZZ0004".encode("ascii")),
-        ("melsec.validate_frame_fmt",
-         lambda f: melsec_codec.validate_frame_fmt(f, "req", frame_format="3e_ascii"),
-         bytes.fromhex("2b5df1f0")),
-        # s7: <17B -> 文档化 ValueError; 写数据 data_len=3 尾差 1B -> struct.error; data_len=1 -> IndexError
-        ("s7.parse_request", s7_codec.parse_request, bytes.fromhex("0300001f02f0")),
-        ("s7.parse_request", s7_codec.parse_request,
-         bytes.fromhex("0300001400f000320100000001000300020500aabbcc")),
-        ("s7.parse_request", s7_codec.parse_request,
-         bytes.fromhex("0300001400f000320100000001000300010500aa")),
-        # iec104: U 格式功能码 0xAA 未收录 -> direction 停留 "auto" -> pydantic ValidationError
-        ("iec104.parse_frame", iec104_codec.parse_frame, bytes.fromhex("6804aad62def99e87a")),
-        # enip: SendRRData item_count=2 但 CIP 载荷截断 -> struct.error; ListIdentity 24B 整 -> struct.error
-        ("enip.parse_request", enip_codec.parse_request,
-         bytes.fromhex("6f0015000010000000000000706c637461700000000000000000000000000200")),
-        ("enip.parse_response", enip_codec.parse_response,
-         bytes.fromhex("630000000000000000000000706c77746170000000000000")),
-    ]
-    for label, fn, frame in pins:
-        result = _call(label, fn, frame)
-        if result is not None:  # 修复后路径: 必须是良构结构化结果
-            _assert_well_formed(result)
+    # --- melsec: binary 请求 data 恰 4~7B, 曾在 _decode_pdu data[7] IndexError ---
+    r = melsec_codec.parse_request_fmt(bytes.fromhex("500000000000000000000001020304"), "3e_binary")
+    assert r.direction == "req" and not r.valid
+    assert any("request data too short for device block" in e for e in r.errors), r.errors
+
+    # --- melsec: ASCII 请求软元件区 20 字符非 hex, 曾 _dec_ascii ValueError ---
+    r = melsec_codec.parse_request_fmt(("500000FF03FF0000180004" + "Z" * 20).encode("ascii"),
+                                       "3e_ascii")
+    assert not r.valid
+    assert any("device block undecodable" in e for e in r.errors), r.errors
+
+    # --- melsec: ASCII 响应端结码 0 + 字值区非 hex, 曾 _decode_word_values ValueError ---
+    r = melsec_codec.parse_response_fmt("D00000FF03FF00000C0000ZZZZ".encode("ascii"),
+                                        frame_format="3e_ascii")
+    assert not r.valid
+    assert any("word values undecodable" in e for e in r.errors), r.errors
+
+    # --- melsec validate: ASCII data_length 字段非 hex -> 失败项留 raw 证据, 不抛 ---
+    checks = {c.name: c for c in melsec_codec.validate_frame_fmt(
+        "500000FF03FF00ZZZZ0004".encode("ascii"), "req", frame_format="3e_ascii")}
+    assert not checks["data_length_consistent"].passed
+    assert "not ASCII hex" in checks["data_length_consistent"].detail
+
+    # --- melsec validate: ASCII 副头部非 ASCII 字节, 曾 UnicodeDecodeError ---
+    checks = {c.name: c for c in melsec_codec.validate_frame_fmt(
+        bytes.fromhex("2b5df1f0"), "req", frame_format="3e_ascii")}
+    assert not checks["subheader_3e_ascii"].passed
+    assert "not ASCII hex" in checks["subheader_3e_ascii"].detail
+    assert not checks["subheader_match"].passed
+
+    # --- s7: 写数据 data_len=2 尾差 1B 曾 struct.error; data_len=1 曾 d[1] IndexError ---
+    r = s7_codec.parse_request(bytes.fromhex("0300001400f000320100000001000300020500aabbcc"))
+    assert r.direction == "req" and not r.valid
+    assert any("write data header truncated: have 3, need 4" in e for e in r.errors), r.errors
+    r = s7_codec.parse_request(bytes.fromhex("0300001400f000320100000001000300010500aa"))
+    assert any("write data header truncated: have 1, need 4" in e for e in r.errors), r.errors
+
+    # --- iec104: I 格式 ASDU 截到 9B 曾 direction="auto" 被 pydantic 拒绝;
+    #     现按监视方向兜底 (与未知 type 一致), 截断留 "ASDU too short" 证据 ---
+    r = iec104_codec.parse_frame(bytes.fromhex("6804aad62def99e87a"))
+    assert r.direction == "resp" and not r.valid
+    assert any("ASDU too short" in e for e in r.errors), r.errors
+
+    # --- iec104: 未知 U 功能码进 errors (方向按主站发起兜底 req), 不掩盖功能码证据 ---
+    r = iec104_codec.parse_frame(bytes.fromhex("680403000000"))
+    assert r.direction == "req" and not r.valid
+    assert any("unknown U-function 0x03" in e for e in r.errors), r.errors
+    ufn = next(f for f in r.fields if f.name == "u_function")
+    assert ufn.value == 0x03 and ufn.note == "UNKNOWN_U_0x03"
+
+    # --- enip: RRData 请求载荷逐段截断, 曾 struct.error; 现转 errors ---
+    def _rrdata_req(payload: bytes) -> bytes:
+        return struct.pack("<HHII8sI", 0x006F, len(payload), 0, 0, b"plctap\x00\x00", 0) + payload
+
+    r = enip_codec.parse_request(_rrdata_req(struct.pack("<IHH", 0, 0, 2)))  # 缺地址项头
+    assert r.direction == "req" and not r.valid
+    assert any("address item truncated" in e for e in r.errors), r.errors
+    r = enip_codec.parse_request(_rrdata_req(struct.pack("<IHHHH", 0, 0, 2, 0, 0)))  # 缺数据项头
+    assert any("data item header truncated" in e for e in r.errors), r.errors
+    r = enip_codec.parse_request(
+        _rrdata_req(struct.pack("<IHH", 0, 0, 2) + struct.pack("<HH", 0, 0)
+                    + struct.pack("<HH", 0x00B2, 4)))  # 数据项体截断
+    assert any("data item truncated: have 0, need 4" in e for e in r.errors), r.errors
+
+    # --- enip: ListIdentity 应答恰 24B, 曾 item_count unpack struct.error ---
+    frame = struct.pack("<HHII8sI", 0x0063, 0, 0, 0, b"plctap\x00\x00", 0)
+    r = enip_codec.parse_response(frame)
+    assert r.direction == "resp" and not r.valid
+    assert any("identity item count truncated" in e for e in r.errors), r.errors
+
+    # --- enip: RegisterSession 应答恰 24B, 曾 version/options unpack struct.error ---
+    frame = struct.pack("<HHII8sI", 0x0065, 0, 0, 0, b"plctap\x00\x00", 0)
+    r = enip_codec.parse_response(frame)
+    assert not r.valid
+    assert any("register session payload truncated" in e for e in r.errors), r.errors
+
+    # --- enip: 身份体截断 (<35B), 曾 body[off] IndexError ---
+    ident = struct.pack("<HH", enip_codec.ITEM_CIP_IDENTITY, 8) + b"\x01\x00" + b"\x00" * 14
+    payload = struct.pack("<H", 1) + ident  # item_count + 身份项
+    frame = struct.pack("<HHII8sI", 0x0063, len(payload), 0, 0, b"plctap\x00\x00", 0) + payload
+    r = enip_codec.parse_response(frame)
+    assert not r.valid
+    assert any("identity body truncated" in e for e in r.errors), r.errors
