@@ -14,6 +14,8 @@ TCP 是流式协议: 单次 read 可能只收到半帧, 也可能一包含多帧
   4E binary  数据长 2B LE @11 → 帧长 = 13 + data_length
   3E ASCII   数据长 4 字符 @14 → 帧长 = 18 + data_length (按字符计)
   4E ASCII   数据长 4 字符 @22 → 帧长 = 26 + data_length (按字符计)
+- iec104: 头部 2B (启动 0x68 + APDU 长度, 长度 = 控制域 4B + 载荷)
+  → 帧长 = 2 + APDU 长度
 """
 
 from __future__ import annotations
@@ -25,16 +27,18 @@ FRAME_HEADER_LEN = {
     "modbus": 6,
     "fins": 16,
     "melsec": 11,
+    "iec104": 2,
 }
 
 # 单帧最大长度护栏: 长度字段畸形 (损坏/错协议) 时防缓冲无限膨胀。
 # modbus 按规范 PDU 上限 253 (帧长 = 6 + 1 + 253); fins 与 adapter 收帧
 # 上限对齐 (0x4000); melsec 取二进制 (0x2000) 与 ASCII 按字符计 (约两倍)
-# 两档的上界
+# 两档的上界; iec104 按规范 APDU 上限 253 (帧长 = 2 + 253)
 MAX_FRAME_LEN = {
     "modbus": 260,
     "fins": 0x4000 + 16,
     "melsec": 0x4000 + 32,
+    "iec104": 255,
 }
 
 
@@ -87,6 +91,10 @@ def try_frame_len(protocol: str, buf: bytes) -> int | None:
     if protocol == "modbus":
         (length,) = struct.unpack_from(">H", buf, 4)
         total = 6 + length
+    elif protocol == "iec104":
+        if buf[0] != 0x68 or not 4 <= buf[1] <= 253:
+            return 0
+        total = 2 + buf[1]
     else:  # fins
         (length,) = struct.unpack_from(">I", buf, 4)
         total = 8 + length

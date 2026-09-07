@@ -27,6 +27,7 @@ from plctap.protocols.fins.adapter import FinsAdapter  # noqa: F401  # 注册副
 from plctap.protocols.melsec.adapter import MelsecAdapter  # noqa: F401  # 注册副作用
 from plctap.protocols.s7.adapter import S7Adapter  # noqa: F401  # 注册副作用
 from plctap.protocols.modbus.adapter import ModbusAdapter  # noqa: F401  # 注册副作用
+from plctap.protocols.iec104.adapter import Iec104Adapter  # noqa: F401  # 注册副作用
 from plctap.protocols.detect import DetectResult, DeviceDetector
 from plctap.listener import ListenerRegistry
 from plctap.proxy import ProxyRegistry
@@ -271,7 +272,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             if direction == "req":
                 return sc.parse_request(frame)
             return sc.parse_read_response(frame)
-        if protocol in ("modbus", "fins"):
+        if protocol in ("modbus", "fins", "iec104"):
             from plctap.protocols.auto import parse_auto
 
             return parse_auto(protocol, frame)

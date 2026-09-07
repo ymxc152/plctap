@@ -1,0 +1,61 @@
+# IEC 60870-5-104 故障知识库 (远动主站-子站通信高频故障)
+# 条目经 diagnose 的帧级证据匹配; probe 证据走 failure_class 通用档
+entries:
+- id: iec104_start_byte_not_104
+  protocol: iec104
+  match:
+    parse_error_contains:
+    - "bad start byte"
+  candidate:
+    symptom: 帧首字符不是 0x68 (IEC 104 启动字符)
+    root_cause: 端口上不是 IEC 104 服务 —— 常见为该端口跑着 Modbus 网关、
+      私有协议, 或中间有透传设备把字节流打乱 (粘包/错位)
+    suggested_action: 用 detect_device 复核端口协议; 抓帧确认对端实际协议族
+    confidence: 0.85
+    next_tools:
+    - detect_device
+    - parse_frame
+- id: iec104_apdu_length_invalid
+  protocol: iec104
+  match:
+    parse_error_contains:
+    - "APDU length"
+  candidate:
+    symptom: APDU 长度字段越界或与帧长不自洽
+    root_cause: 流已失步 (TCP 粘包被按 104 切错) 或对端实现不规范;
+      APDU 合法范围 4-253
+    suggested_action: 从连接建立时刻重新抓帧对齐; 核对中间设备 (安全网关/
+      串口服务器) 是否改写报文
+    confidence: 0.8
+    next_tools:
+    - parse_pcap
+    - start_listener
+- id: iec104_unknown_type_id
+  protocol: iec104
+  match:
+    parse_error_contains:
+    - "unknown type id"
+  candidate:
+    symptom: ASDU 类型标识未收录
+    root_cause: 对端使用了本工具未收录的 IEC 60870-5-101/104 类型标识,
+      或帧错位导致类型字节解析错误
+    suggested_action: 结合 parse_frame 的完整字段定位对象区边界; 若为私有
+      类型需厂家手册配合 (plctap 不做臆测解析)
+    confidence: 0.7
+    next_tools:
+    - parse_frame
+- id: iec104_probe_no_startdt_con
+  protocol: iec104
+  match:
+    failure_class:
+    - connected_but_no_reply
+  candidate:
+    symptom: TCP 可建立但 STARTDT 无确认
+    root_cause: 端口上服务不是 104 从站, 或子站拒绝该主站 (白名单/已达
+      连接数上限 k1), 或 APDU 层协商失败
+    suggested_action: 核对子站连接数与主站 IP 白名单配置; 用 start_listener
+      在同端口钓帧对比正常主站的报文序列
+    confidence: 0.8
+    next_tools:
+    - start_listener
+    - probe_device

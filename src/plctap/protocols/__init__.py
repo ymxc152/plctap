@@ -22,4 +22,12 @@ def codec_for(protocol: str) -> ModuleType:
         from plctap.protocols.melsec import codec
 
         return codec
+    if protocol == "iec104":
+        from plctap.protocols.iec104 import codec
+
+        return codec
+    if protocol == "modbus_rtu":
+        from plctap.protocols.modbus import codec
+
+        return codec  # RTU 与 TCP 同 codec (parse_rtu/validate_rtu 轨道)
     raise KeyError(f"unknown protocol {protocol!r}")

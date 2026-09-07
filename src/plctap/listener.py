@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 from plctap import streams
 from plctap.protocols.fins import codec as fins_codec
+from plctap.protocols.iec104 import codec as i104
 from plctap.protocols.melsec import codec as mc_codec
 
 _LISTENER_FRAME_LIMIT = 1000  # 环形上限, 防长跑抓包内存膨胀
@@ -292,7 +293,64 @@ def build_normal_response(protocol: str, frame: bytes, fins_node: int | None = N
         return _modbus_response(frame)
     if protocol == "fins":
         return _fins_response(frame, fins_node)
+    if protocol == "iec104":
+        return _iec104_response(frame)
     return _melsec_response(frame)  # melsec
+
+
+def _iec104_response(frame: bytes) -> bytes | None:
+    """104 钓鱼回帧: U 握手回 CON; 总召 ACT -> ACT_CON + 罐头监视帧 + ACT_TERM。
+
+    I 帧序号: 我方发送序号取请求帧的 rx_seq (确认对方已收到的量),
+    我方接收确认回显请求 tx_seq —— 无状态服务的最小合规实现。
+    罐头监视数据恒定: 单点遥信 200..207 交替真假, 短浮点 300..303 = 0.25*i。
+    """
+    if len(frame) < 6 or frame[0] != i104.START_BYTE:
+        return None
+    fmt = i104.apci_format(frame[2:6])
+    if fmt == "U":
+        con = {i104.U_STARTDT_ACT: i104.U_STARTDT_CON,
+               i104.U_TESTFR_ACT: i104.U_TESTFR_CON,
+               i104.U_STOPDT_ACT: i104.U_STOPDT_CON}.get(frame[2])
+        return i104.build_apci_u(con) if con else None
+    if fmt != "I" or len(frame) <= 6:
+        return None  # S 帧/空 I 帧: 无需回应
+    req = i104.parse_asdu(frame, i104.APCI_LEN, len(frame) - 6)
+    fields = {f.name: f.value for f in req.fields}
+    if fields.get("type_id") != i104.C_IC_NA_1 or fields.get("cot") != 6:
+        return None
+    tx = _apci_seq(frame, 1)  # 对方接收序号 = 我方发送序号
+    rx = _apci_seq(frame, 0)
+    ca = fields.get("common_address", 1)
+    frames = []
+    # ACT_CON (回显请求 ASDU, COT 6 -> 7)
+    act_con = bytearray(frame[6:])
+    act_con[2] = 7 & 0xFF
+    act_con[3] = 0
+    frames.append(i104.build_apci_i(tx, rx, bytes(act_con)))
+    # 罐头: 单点遥信 200..207 (SQ=0, COT 20 站总召)
+    tx = (tx + 1) & 0x7FFF
+    sp = [(200 + i, [0x01 if i % 2 == 0 else 0x00]) for i in range(8)]
+    frames.append(i104.build_apci_objects(i104.M_SP_NA_1, sp, 20, ca, tx, rx))
+    # 罐头: 短浮点 300..303
+    tx = (tx + 1) & 0x7FFF
+    import struct as _s
+    nc = [(300 + i, list(_s.pack("<f", 0.25 * i)) + [0]) for i in range(4)]
+    frames.append(i104.build_apci_objects(i104.M_ME_NC_1, nc, 20, ca, tx, rx))
+    # ACT_TERM
+    tx = (tx + 1) & 0x7FFF
+    act_term = bytearray(frame[6:])
+    act_term[2] = 10 & 0xFF
+    act_term[3] = 0
+    frames.append(i104.build_apci_i(tx, rx, bytes(act_term)))
+    return b"".join(frames)
+
+
+def _apci_seq(frame: bytes, idx: int) -> int:
+    """I 帧控制域第 idx 个 16 位字 -> 15bit 序号 (idx 0=发送, 1=接收)。"""
+    import struct as _s
+    (w,) = _s.unpack_from("<H", frame, 2 + idx * 2)
+    return w >> 1
 
 
 def _modbus_response(frame: bytes) -> bytes | None:

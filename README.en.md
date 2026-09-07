@@ -3,7 +3,7 @@
 [中文](README.md) | **English**
 
 > The PLC driver layer for agents — an MCP server that lets Claude / Codex / Cursor
-> connect to, read/write, and diagnose Modbus TCP / Modbus RTU over TCP / FINS / MELSEC / Siemens S7comm PLCs.
+> connect to, read/write, and diagnose Modbus TCP / Modbus RTU over TCP / FINS / MELSEC / Siemens S7comm / IEC 60870-5-104 PLCs.
 
 ![CI](https://github.com/ymxc152/plctap/actions/workflows/ci.yml/badge.svg)
 [![PyPI](https://img.shields.io/pypi/v/plctap)](https://pypi.org/project/plctap/)
@@ -12,7 +12,7 @@
 
 ![demo](docs/demo.gif)
 
-**Status: v0.5.1 (automatic protocol detection + transparent proxy + fault-injection listener + read/write across five protocol endpoints + cross-vendor e2e).**
+**Status: v0.5.2 (automatic protocol detection + transparent proxy + fault-injection listener + read/write across six protocol endpoints; IEC 104 cross-validated bidirectionally against the official lib60870 implementation).**
 
 ## Tools
 
@@ -20,7 +20,7 @@
 |---|---|---|
 | Connect | `detect_device` | **Automatic protocol detection**: concurrently probes standard ports for a given IP, identifies protocol/port/confidence from response fingerprints; deep mode performs a verification read and produces an executable `plc_read` suggestion; strictly read-only |
 | Connect | `probe_device` | Connectivity probe + four-class layered failure attribution (MELSEC supports 3E binary/ASCII automatic fallback) |
-| Connect | `plc_read` | Reads data areas and interprets by datatype/byte order (five protocol endpoints: modbus / modbus_rtu / fins / melsec / s7); with `datatype` omitted, returns multi-interpretations: uint16/int16/float32 in four byte orders (abcd/cdab/badc/dcba)/int32 |
+| Connect | `plc_read` | Reads data areas and interprets by datatype/byte order (six protocol endpoints: modbus / modbus_rtu / fins / melsec / s7 / iec104); with `datatype` omitted, returns multi-interpretations: uint16/int16/float32 in four byte orders (abcd/cdab/badc/dcba)/int32 |
 | Diagnose | `parse_frame` / `validate_frame` | Structured single-frame parsing / conformance checklist |
 | Diagnose | `diagnose` | Rule engine + fault knowledge base → structured candidate report |
 | Diagnose | `parse_pcap` | Parses Wireshark-exported pcap, stream by stream and frame by frame (protocol identified independently per TCP stream; requires `uv sync --extra eval`) |
