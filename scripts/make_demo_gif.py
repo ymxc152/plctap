@@ -2,15 +2,21 @@
 """生成 docs/demo.gif: 用真实 plctap 工具调用数据渲染聊天式演示动画。
 
 用法 (仓库根目录):
-    uv run --with pillow python scripts/make_demo_gif.py
+    .venv/Scripts/python.exe scripts/make_demo_gif.py
 
 - 内嵌最小 Modbus TCP 从站 (纯 asyncio, 无外部依赖), 预置与联测相同的数据
 - detect 场景复用 eval/fakes.py 的进程内假设备 (与 benchmark detect 档同源)
+- EtherNet/IP 场景按 tests/e2e 先例用 importlib 按文件路径加载
+  tests/test_adapter_enip.py 的进程内假服务器 (tests/ 非可导入包)
+- 钓鱼监听场景真实调用 plctap.listener.ListenerRegistry (record_only),
+  脚本内 raw socket 客户端扮演"只当 client"的设备, 帧用 modbus codec
+  build 纯函数构造, 收帧解析走 parse_auto (与 parse_frame 工具同轨)
 - 工具调用全部真实执行, 渲染层只负责画图
 """
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import struct
 import sys
@@ -22,10 +28,14 @@ sys.path.insert(0, str(ROOT / "eval"))
 
 from plctap.config import PlctapConfig  # noqa: E402
 from plctap.conn.manager import ConnectionPool  # noqa: E402
+from plctap.listener import ListenerRegistry  # noqa: E402
 from plctap.models import Target  # noqa: E402
+from plctap.protocols.auto import parse_auto  # noqa: E402
 from plctap.protocols.detect import DeviceDetector  # noqa: E402
+from plctap.protocols.enip.adapter import EnipAdapter  # noqa: E402
 from plctap.protocols.fins import adapter as _fins  # noqa: E402,F401  import 副作用登记注册表
 from plctap.protocols.melsec import adapter as _mc  # noqa: E402,F401
+from plctap.protocols.modbus import codec as modbus_codec  # noqa: E402
 from plctap.protocols.modbus.adapter import ModbusAdapter, ModbusError  # noqa: E402
 from plctap.protocols.s7 import adapter as _s7  # noqa: E402,F401
 
@@ -90,6 +100,28 @@ class DemoSlave:
 
 
 # ---------------------------------------------------------------- 真实调用
+
+
+def _load_fake_enip_server():
+    """tests/ 非可导入包 (无 __init__.py), 按 tests/e2e 先例按文件路径加载。"""
+    path = ROOT / "tests" / "test_adapter_enip.py"
+    spec = importlib.util.spec_from_file_location("_fake_enip_for_demo", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod.FakeEnipServer
+
+
+async def _wait_frames(reg: ListenerRegistry, port: int, n: int, timeout: float = 3.0) -> list[dict]:
+    """轮询等监听器收满 n 帧 (get_listener_frames 的进程内同款读取)。"""
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        frames = reg.frames(port)
+        if len(frames) >= n:
+            return frames
+        await asyncio.sleep(0.02)
+    return reg.frames(port)
 
 
 def gather_transcript() -> list[tuple[str, list[str]]]:
@@ -160,6 +192,64 @@ def gather_transcript() -> list[tuple[str, list[str]]]:
                 str(e),
                 "建议: 确认该设备寄存器区范围后再读 (应用层配置问题)。",
             ]))
+
+        # 6) EtherNet/IP tag 读 (进程内假服务器: importlib 复用适配器测试 fixture)
+        FakeEnipServer = _load_fake_enip_server()
+        enip = FakeEnipServer()
+        host_e, port_e = await enip.start()
+        pool_e = ConnectionPool()
+        try:
+            enip_adapter = EnipAdapter(pool_e, PlctapConfig())
+            tgt_e = Target(protocol="enip", host=host_e, port=port_e, unit=1)
+            re_ = await enip_adapter.read(tgt_e, "alpha[0]", 3, datatype="dint")
+        finally:
+            await pool_e.close_all()
+            await enip.stop()
+        t.append(("user", ["对面还有台 Rockwell 的设备, 走 EtherNet/IP, 读个 tag 看看?"]))
+        t.append(("agent", [
+            "调用 plc_read (CIP Read Tag, tag=alpha[0]):",
+            json.dumps({"raw": re_.raw_registers, "interpreted": re_.interpreted}, ensure_ascii=False),
+            "DINT 数组按双字小端拆解, 读回 [42, 43, 44], tag 直读闭环。",
+        ]))
+
+        # 7+8) 钓鱼监听: 设备只当 client, 起假 server 钓它的帧行为 (record_only)
+        reg = ListenerRegistry()
+        info = await reg.start("modbus", "127.0.0.1", 0, "record_only")
+        lport = info["port"]
+        reqs = [  # codec build 纯函数构造的设备侧请求帧
+            modbus_codec.build_read_request(7, 1, 3, 0, 2),    # fc03 轮询读 addr 0-1
+            modbus_codec.build_read_request(8, 1, 3, 100, 1),  # fc03 读 addr 100
+            modbus_codec.build_write_single(9, 1, 6, 5, 314),  # fc06 写 addr 5
+        ]
+        reader, writer = await asyncio.open_connection("127.0.0.1", lport)
+        for req in reqs:  # 脚本内 raw socket 客户端扮演"只出不进"的设备
+            writer.write(req)
+            await writer.drain()
+            await asyncio.sleep(0.1)  # 分帧: 防止两帧并在一次 read 里被吞
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (OSError, ConnectionError):
+            pass
+        cap = await _wait_frames(reg, lport, len(reqs))
+        summary = await reg.stop(lport)
+        first = parse_auto("modbus", bytes.fromhex(cap[0]["frame_hex"]))  # 与 parse_frame 同轨
+        pfields = {f.name: f.value for f in first.fields}
+        slim = {k: pfields[k] for k in ("unit_id", "function_code", "address", "quantity") if k in pfields}
+        t.append(("user", ["还有台老网关只出不进, 只当 client, 我连不上它怎么办?"]))
+        t.append(("agent", [
+            "调用 start_listener (钓鱼模式, 立假 server 等它上钩):",
+            json.dumps({"protocol": info["protocol"], "port": info["port"], "mode": info["mode"]}, ensure_ascii=False),
+            "record_only: 只收帧不回话, 被动钓它的真实行为。",
+        ]))
+        t.append(("user", ["设备连上来了, 吐了几帧就断开。"]))
+        t.append(("agent", [
+            "调用 get_listener_frames -> parse_frame:",
+            f"> {cap[0]['frame_hex']}",
+            json.dumps({"valid": first.valid, **slim}, ensure_ascii=False),
+            f"钓到了: fc03 读 + fc06 写都录下来 (共 {summary['recorded']} 帧), stop_listener 收工。",
+        ]))
+
         await slave.stop()
         return t
 
@@ -178,6 +268,8 @@ BLUE = (130, 200, 255)
 YELLOW = (255, 224, 130)
 GREY = (150, 150, 170)
 
+FOOTER = "github.com/ymxc152/plctap · detect/read/write/listen · Modbus/FINS/MELSEC/S7/IEC 104/EtherNet/IP"
+
 
 def render_gif(transcript: list[tuple[str, list[str]]], out: Path) -> None:
     from PIL import Image, ImageDraw, ImageFont
@@ -191,53 +283,72 @@ def render_gif(transcript: list[tuple[str, list[str]]], out: Path) -> None:
 
     f_title, f_body, f_mono = font(22, True), font(16), font(14)
 
-    def wrap(s: str, width: int) -> list[str]:
-        return [s[i : i + width] for i in range(0, len(s), width)] or [""]
+    # 像素级换行 (中英混排按实测宽度, 不再按字符数估算)
+    measure = ImageDraw.Draw(Image.new("RGB", (8, 8)))
 
-    frames: list[Image.Image] = []
-
-    def bubble(draw, y, role, lines):
-        is_user = role == "user"
-        maxw = 78
-        wrapped = []
-        for ln in lines:
-            if any(ch in ln for ch in "{}[]"):
-                wrapped += wrap(ln, maxw - 4)
+    def wrap(s: str, fnt, maxw: int) -> list[str]:
+        lines, cur = [], ""
+        for ch in s:
+            if cur and measure.textlength(cur + ch, font=fnt) > maxw:
+                lines.append(cur)
+                cur = ch
             else:
-                wrapped += wrap(ln, maxw - 8)
-        h = 18 + len(wrapped) * 21
+                cur += ch
+        lines.append(cur or "")
+        return lines
+
+    # 预排版: 每条消息 -> [(文本段, 是否等宽)], 及气泡高度
+    def msg_segs(role: str, lines: list[str]) -> list[tuple[str, bool]]:
+        maxw = 472 if role == "user" else 672  # 气泡内宽 (像素)
+        segs: list[tuple[str, bool]] = []
+        for ln in lines:
+            mono = any(ch in ln for ch in "{}[]<>")
+            segs += [(seg, mono) for seg in wrap(ln, f_mono if mono else f_body, maxw)]
+        return segs
+
+    layout = [(role, msg_segs(role, lines)) for role, lines in transcript]
+    heights = [18 + len(segs) * 21 + 14 for _, segs in layout]  # 气泡高 + 间距
+
+    def draw_bubble(d, y, role, segs) -> None:
+        is_user = role == "user"
+        h = 18 + len(segs) * 21
         x0 = W - 500 - 30 if is_user else 30
         x1 = x0 + (500 if is_user else 700)
-        draw.rounded_rectangle([x0, y, x1, y + h], radius=12,
-                               fill=USER_BG if is_user else AGENT_BG,
-                               outline=(80, 80, 110), width=1)
+        d.rounded_rectangle([x0, y, x1, y + h], radius=12,
+                            fill=USER_BG if is_user else AGENT_BG,
+                            outline=(80, 80, 110), width=1)
         yy = y + 8
-        for ln in wrapped:
-            mono = any(ch in ln for ch in "{}[]<>")
-            color = (255, 255, 255) if is_user else (GREEN if ln.startswith(">") else BLUE)
-            if "建议" in ln or "写入成功" in ln:
+        for seg, mono in segs:
+            color = (255, 255, 255) if is_user else (GREEN if seg.startswith(">") else BLUE)
+            if "建议" in seg or "写入成功" in seg or "钓到了" in seg:
                 color = YELLOW
-            draw.text((x0 + 14, yy), ln, font=f_mono if mono else f_body, fill=color)
+            d.text((x0 + 14, yy), seg, font=f_mono if mono else f_body, fill=color)
             yy += 21
-        return y + h + 14
 
-    # 帧渐进: 每帧多显示一条消息 (第 i 帧显示 transcript[:i+1] 完整重绘)
-    steps = [(role, lines) for role, lines in transcript]
-    for i, (role, lines) in enumerate(steps):
+    # 帧渐进: 每帧多显示一条消息 (第 i 帧显示 transcript[:i+1] 完整重绘);
+    # 内容超过可视区时像聊天窗口一样上滚, 保证最新消息可见
+    n = len(layout)
+    frames: list[Image.Image] = []
+    for i in range(n):
         img = Image.new("RGB", (W, H), BG)
         d = ImageDraw.Draw(img)
-        d.rectangle([0, 0, W, 46], fill=PANEL)
+        bottom_limit = H - 70 if i == n - 1 else H - 30  # 末帧给落款留位
+        ys, y = [], 62
+        for k in range(i + 1):
+            ys.append(y)
+            y += heights[k]
+        content_bottom = ys[-1] + heights[i] - 14
+        scroll = max(0, content_bottom - bottom_limit)
+        for k in range(i + 1):
+            top = ys[k] - scroll
+            if top + heights[k] < 46:
+                continue  # 已滚出标题栏上方
+            draw_bubble(d, top, layout[k][0], layout[k][1])
+        d.rectangle([0, 0, W, 46], fill=PANEL)  # 标题栏后画, 滚动的气泡从其下方穿过
         d.text((20, 11), "plctap — Agent 的 PLC 驱动层 (真实工具调用演示)", font=f_title, fill=(235, 235, 245))
-        y = 62
-        for j in range(i + 1):
-            r, ls = steps[j]
-            y = bubble(d, y, r, ls)
-            if y > H - 30:
-                y = bubble(d, y, r, ls)  # 越界兜底 (内容较长时可能截断)
-        if i == len(steps) - 1:
+        if i == n - 1:
             d.rounded_rectangle([30, H - 64, W - 30, H - 18], radius=10, fill=PANEL)
-            d.text((46, H - 55), "github.com/ymxc152/plctap · detect -> read -> write -> interpret · Modbus/FINS/MELSEC/S7",
-                   font=f_body, fill=GREY)
+            d.text((46, H - 55), FOOTER, font=f_body, fill=GREY)
         frames.append(img)
 
     frames[0].save(out, save_all=True, append_images=frames[1:], duration=2800, loop=0, optimize=True)
@@ -249,7 +360,9 @@ def main() -> None:
     out_dir.mkdir(exist_ok=True)
     transcript = gather_transcript()
     render_gif(transcript, out_dir / "demo.gif")
-    print(f"OK: {out_dir / 'demo.gif'} ({(out_dir / 'demo.gif').stat().st_size // 1024} KB)")
+    gif, png = out_dir / "demo.gif", out_dir / "demo.png"
+    print(f"OK: {gif} ({gif.stat().st_size // 1024} KB) + {png} ({png.stat().st_size // 1024} KB), "
+          f"{len(transcript)} 条消息")
 
 
 if __name__ == "__main__":
