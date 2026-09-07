@@ -10,8 +10,10 @@
   GitHub 建仓  +  PyPI 建项目并开 trusted publishing  +  收录站注册账号
 
 每次发版 (5 分钟):
-  bump pyproject version -> uv build 本地自检 -> git tag vX.Y.Z -> push
-  -> CI 自动: 发 PyPI + 收录 MCP 官方 Registry (server.json 版本由 CI 对齐 tag)
+  合入 main -> 在 main 上 bump pyproject version (直接编辑, 不用 sed 模式替换)
+  -> uv build 本地自检 -> git tag vX.Y.Z -> git push origin refs/tags/vX.Y.Z
+  -> CI 自动: guard-main 闸门 (tag 必须已在 main 历史内, 分支 tag 拒绝发布)
+     -> 发 PyPI + 收录 MCP 官方 Registry (server.json 版本由 CI 对齐 tag)
 ```
 
 ## 阶段 0: 一次性前置
@@ -44,14 +46,18 @@
 ## 阶段 1: 每次发版 (固定动作)
 
 ```bash
-# 1) bump 版本 (0.x 阶段手动改 pyproject.toml 的 version)
+# 1) bump 版本 (0.x 阶段手动编辑 pyproject.toml 的 version; 不用 sed 模式替换
+#    —— v0.5.2 曾因 sed 模式未匹配 0.5.1 导致 tag 校验失败、删 tag 重打)
 # 2) 本地自检: 构建 + 冒烟
 uv build
 uv run python -m pytest -q          # 全量测试
 uvx --from . plctap                  # 控制台入口能启动 (stdio 挂起=正常)
 # 3) 提交 + 打标签 + 推送 (server.json 不用手动 bump, CI 自动对齐 tag)
+#    发布闸门 (guard-main): 仅 main 历史内的 tag 触发发布 —— 先合入 main 再打 tag,
+#    分支上的 tag 会被 CI 拒绝; tag 用显式 refspec 推送, 避免与同名分支歧义
+#    (v0.5.2 教训)
 git add pyproject.toml && git commit -m "release: vX.Y.Z"
-git tag vX.Y.Z && git push origin main --tags
+git tag vX.Y.Z && git push origin refs/heads/main && git push origin refs/tags/vX.Y.Z
 # 4) CI 自动: 版本一致性校验 -> 构建 -> 上传 PyPI (OIDC, 无密钥)
 #            -> 等 PyPI 索引生效 -> mcp-publisher publish server.json 收录官方 Registry
 # 5) 验收
