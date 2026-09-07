@@ -72,14 +72,16 @@ class ProbeResult(BaseModel):
     failure_class: FailureClass | None = None
     exception_code: int | None = None
     layer_hint: LayerHint = "application"
+    identity: dict | None = None  # 设备身份 (enip ListIdentity: vendor/product 等)
 
 
 class ReadResult(BaseModel):
     """plc_read 输出。raw_registers 为寄存器原始 16 位值; interpreted 为按
-    datatype/byteorder 解释后的值。request_frame 保留 hex 便于人工核对。"""
+    datatype/byteorder 解释后的值。request_frame 保留 hex 便于人工核对。
+    address: 整数地址 (modbus/fins/melsec/s7) 或 tag 名字符串 (enip)。"""
 
     target: Target
-    address: int
+    address: int | str
     request_frame: str
     raw_registers: list[int]
     interpreted: Any = None

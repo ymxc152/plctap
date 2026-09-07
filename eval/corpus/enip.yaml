@@ -1,0 +1,33 @@
+# EtherNet/IP (CIP) 专项语料 (v0.5.3 第七档)
+# 帧全部由本仓库 codec 构造 (红线 1); RegisterSession/ListIdentity 与
+# pycomm3 官方实现逐字节比对一致 (sender context 为 plctap 标识)
+- id: enip_register_session_ok
+  tier: enip
+  protocol: enip
+  input: { frame_hex: "650004000000000000000000706c6374617000000000000001000000" }
+  expect:
+    valid: true
+    no_candidates: true
+- id: enip_list_identity_ok
+  tier: enip
+  protocol: enip
+  input: { frame_hex: "630000000000000000000000706c63746170000000000000" }
+  expect:
+    valid: true
+    no_candidates: true
+- id: enip_cip_status_path_unknown
+  tier: enip
+  protocol: enip
+  # 读应答 CIP 0x05: tag 不存在
+  input: { frame_hex: "6f0015000010000000000000706c63746170000000000000000000000000020000000000b1000500cc00050000" }
+  expect:
+    symptom_keywords: ["PATH_DESTINATION_UNKNOWN", "tag 不存在"]
+    cause_keywords: ["拼写", "已从控制器删除"]
+- id: enip_cip_status_reply_too_large
+  tier: enip
+  protocol: enip
+  # 读应答 CIP 0x0F: 应答过大
+  input: { frame_hex: "6f0015000010000000000000706c63746170000000000000000000000000020000000000b1000500cc000f0000" }
+  expect:
+    symptom_keywords: ["REPLY_TOO_LARGE", "应答过大"]
+    cause_keywords: ["元素数太多", "分多次读"]

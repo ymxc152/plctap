@@ -30,7 +30,7 @@ def test_kb_entry_shape(entry):
     c = entry["candidate"]
     assert c["symptom"] and c["root_cause"] and c["suggested_action"]
     assert 0 < c["confidence"] <= 1
-    assert entry["protocol"] in ("modbus", "modbus_rtu", "fins", "melsec", "s7", "iec104", "any")
+    assert entry["protocol"] in ("modbus", "modbus_rtu", "fins", "melsec", "s7", "iec104", "enip", "any")
     m = entry.get("match", {})
     assert isinstance(m, dict)
     if "failure_class" in m:

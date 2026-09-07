@@ -5,7 +5,7 @@
 中文 | [English](README.en.md)
 
 > Agent 的 PLC 驱动层 — 让 Claude / Codex / Cursor 直接连接、读写、诊断
-> Modbus TCP / Modbus RTU over TCP / FINS / MELSEC / Siemens S7comm / IEC 60870-5-104 PLC 的 MCP Server。
+> Modbus TCP / Modbus RTU over TCP / FINS / MELSEC / Siemens S7comm / IEC 60870-5-104 / EtherNet/IP (CIP) PLC 的 MCP Server。
 
 ![CI](https://github.com/ymxc152/plctap/actions/workflows/ci.yml/badge.svg)
 [![PyPI](https://img.shields.io/pypi/v/plctap)](https://pypi.org/project/plctap/)
@@ -14,7 +14,7 @@
 
 ![demo](docs/demo.gif)
 
-**状态: v0.5.2 (协议自动识别 + 透明代理 + 故障注入监听 + 六协议端点读写, IEC 104 经 lib60870 官方实现双向交叉验证)。**
+**状态: v0.5.3 (协议自动识别 + 透明代理 + 故障注入监听 + 七协议端点读写; IEC 104 经 lib60870、EtherNet/IP 经 pycomm3 官方实现交叉验证)。**
 
 ## 工具
 
@@ -22,7 +22,7 @@
 |---|---|---|
 | 连接 | `detect_device` | **协议自动识别**: 给 IP 并发探测标准端口, 按响应指纹判定协议/端口/置信度, deep 模式验证读并生成可执行的 plc_read 建议; 全程只读 |
 | 连接 | `probe_device` | 连通性探测 + 四类失败分层归因 (MELSEC 支持 3E binary/ASCII 自动回退) |
-| 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (六个协议端点: modbus / modbus_rtu / fins / melsec / s7 / iec104); datatype 缺省返回 uint16/int16/float32 四种字序 (abcd/cdab/badc/dcba)/int32 多解释 |
+| 连接 | `plc_read` | 读数据区并按 datatype/字节序解释 (七个协议端点: modbus / modbus_rtu / fins / melsec / s7 / iec104 / enip); datatype 缺省返回 uint16/int16/float32 四种字序 (abcd/cdab/badc/dcba)/int32 多解释 |
 | 诊断 | `parse_frame` / `validate_frame` | 单帧结构化解析 / 规范校验清单 |
 | 诊断 | `diagnose` | 规则引擎 + 故障知识库 → 结构化候选报告 |
 | 诊断 | `parse_pcap` | 解析 Wireshark 导出 pcap, 逐流逐帧 (每条 TCP 流独立判别协议, 需 `uv sync --extra eval`) |
