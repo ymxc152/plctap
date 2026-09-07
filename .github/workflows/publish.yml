@@ -1,6 +1,8 @@
 name: Publish to PyPI & MCP Registry
 
 # 打 v* 标签即触发: git tag v0.1.0 && git push origin v0.1.0
+# 发布闸门: 仅允许"已合入 main 的 commit"上的 tag 触发发布 (分支上的 tag 不发布,
+# 流程改为: 分支合入 main -> 在 main 上打 tag)。
 # 两个发布均走 OIDC (GitHub Actions 内不需要任何 token/密码):
 #   1. PyPI Trusted Publishing   — 前置一次性设置见 docs/PUBLISH.md 阶段 0.2
 #   2. MCP Registry 收录 server.json — 无需注册账号, GitHub 身份即凭证 (阶段 0.3)
@@ -13,7 +15,26 @@ permissions:
   id-token: write  # OIDC 签发发布凭证 (PyPI 与 MCP Registry 共用)
 
 jobs:
+  # 首闸: tag 所指 commit 必须已在 main 历史内 (annotated tag 用 ^commit 解引用)
+  guard-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 校验 tag 所指 commit 已合入 main
+        run: |
+          git fetch origin main
+          TAG_COMMIT=$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")
+          if git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+            echo "tag 所指 commit $(git rev-parse --short "$TAG_COMMIT") 已在 main 历史内, 放行发布"
+          else
+            echo "::error::tag 所指 commit 不在 main 历史内 — 请先将分支合入 main, 再在 main 上打 tag 发布"
+            exit 1
+          fi
+
   publish:
+    needs: guard-main
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
