@@ -50,6 +50,10 @@ jobs:
             exit 1
           fi
       - run: uv build
+      - uses: actions/upload-artifact@v4   # dist 产物转交 github-release job 挂 assets (与 PyPI 上传同源同文件)
+        with:
+          name: dist
+          path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   # GitHub Release 页面: PyPI 发布成功即创建, notes 按 commit 前缀自动分类
@@ -105,6 +109,14 @@ jobs:
             gh release create "$TAG" --verify-tag --title "plctap $TAG" "${ARGS[@]}"
             echo "Release $TAG 已创建 (categorized notes)"
           fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Upload wheel/sdist to Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
 
   # MCP Registry 收录: server.json 里引用的 pypi 包版本会被 registry 校验真实存在,
   # 因此必须等 publish (PyPI) 成功后再发, 且要等 PyPI 索引对 CDN 生效。
