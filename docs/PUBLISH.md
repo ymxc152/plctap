@@ -22,8 +22,8 @@
 - 用 `gh repo create ymxc152/plctap --public --source . --push`
   (或网页建空仓后 `git remote add origin git@github.com:ymxc152/plctap.git && git push -u origin main`)
 - 仓库设置里填:
-  - **Description** (建议): `Agent 的 PLC 驱动层 — Modbus TCP / FINS / MELSEC 的 MCP Server (探测/读写/报文诊断)`
-  - **Topics** (建议): `mcp, modbus, fins, melsec, plc, industrial-automation, agent, fastmcp, scada`
+  - **Description** (建议, 已按七协议更新): `Agent 的 PLC 驱动层 — Modbus TCP/RTU / FINS / MELSEC / S7comm / IEC 104 / EtherNet/IP 的 MCP Server (探测/识别/读写/诊断)`
+  - **Topics** (建议): `mcp, mcp-server, modelcontextprotocol, modbus, s7, s7comm, fins, melsec, iec60870, ethernet-ip, plc, industrial-automation, agent, fastmcp`
 - CI 已在 `.github/workflows/ci.yml` (push/PR 跑全量 pytest), 推上去就自动绿
 
 ### 0.2 PyPI 项目
@@ -62,13 +62,20 @@ git add pyproject.toml && git commit -m "release: vX.Y.Z"
 git tag vX.Y.Z && git push origin refs/heads/main && git push origin refs/tags/vX.Y.Z
 # 4) CI 自动: 版本一致性校验 -> 构建 -> 上传 PyPI (OIDC, 无密钥)
 #            -> 等 PyPI 索引生效 -> mcp-publisher publish server.json 收录官方 Registry
+#            -> 创建 GitHub Release (notes 按 commits 自动生成, 可事后润色)
 # 5) 验收
 uvx plctap                           # 任意机器一行装起来
 ```
 
-### 版本号约定
-- 0.1.x: alpha, 每次有可发布增量就 tag
-- 1.0: 语义定稿 (READme 评测对比表 + 双端截图齐了之后)
+### 版本号约定与发布节奏（2026-09-07 起: 累积发布）
+- **main 单主干累积**: 日常 commit/小分支直接进 main（每次 push CI 全量跑, main 永远是
+  绿的"随时可发"状态）; **不打 tag 就不发版** —— bump 版本、tag、发布三步只发生在发版时刻
+- **发版触发（满足其一）**: ① 一个里程碑/批次 DoD 达成 ② 累计窗口到 1~2 周
+  ③ 需要紧急修复（不等累积, 单独发 patch）
+- **版本号语义 (0.x 阶段)**: minor = 功能批次 (v0.6.0 = 产品化收官批次), patch = 修复 (v0.6.1)
+- 累积期的变更账本 = commit 流 + PLAN.md 里程碑; 发版时 GitHub Release notes 自动按
+  commits 生成, 值得讲的亮点 (如"台架抓出 S7 审计缺口")发版后手动润色到 release 页
+- 1.0: 语义定稿 (评测对比表滚动更新 + 产品化收官项齐了之后; 原条件中的双端截图已取消)
 
 ## Skill 的安装方式 (重点, 与包分开)
 
@@ -89,12 +96,13 @@ README 里补一句即可。若以后想在 `uvx` 后一行装 skill, 再加一�
 - [x] README 首屏徽章已加 (CI + PyPI 版本 + MCP Registry + License)
 - [x] ~~三端接入截图~~ 取消: 接入配置样例已足够说明, 不再需要截图
 
-## 阶段 3: 剩余收录站提交 (mcp.so / Pulse, 每站一条)
+## 阶段 3: 剩余收录站 (2026-09-07 定为观察项, 当前无待办动作)
 
-- 官方 Registry (CI 自动) 与 glama.ai (爬虫自动收录/更新) 均无需手动操作
-- 提交内容: 名称 `plctap` / 一句话描述 / 服务器 URL (npm 的填 `plctap`)
-- 描述建议: `Agent-PLC MCP server: probe, read, write and diagnose Modbus TCP / FINS / MELSEC / S7 PLCs`
-- 两个站各自"提交"表单, 填完等收录 (一般 1-3 个工作日)
+- 官方 Registry (CI 自动, 0.4.0→0.5.5 多版本 active) 与 glama.ai (爬虫自动收录/同步版本) 均无需手动操作
+- **mcp.so**: 实测仅 $39 付费档收录, 用户决策跳过; 若后续愿付费, 提交内容如下备用
+- **Pulse**: 官方暂停接收 (其建议改投官方 Registry, 已在); 恢复后再评估
+- 备用提交内容: 名称 `plctap` / 一句话描述 / 服务器 URL (PyPI 包填 `plctap`)
+- 描述建议: `Agent-PLC MCP server: probe, detect, read, write and diagnose Modbus TCP/RTU, FINS, MELSEC, S7comm, IEC 104 and EtherNet/IP devices`
 
 ## 安全检查 (每次发版前过一遍)
 

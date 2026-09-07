@@ -52,6 +52,23 @@ jobs:
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
 
+  # GitHub Release 页面: PyPI 发布成功即创建 (与 Registry 解耦, Registry 失败走 registry-sync
+  # 补录不影响 release)。notes 按"上个 tag 到本 tag 的 commits"自动生成, 发版后可手动润色。
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 仅本 job 需要: 创建 Release 对象
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            --title "plctap $GITHUB_REF_NAME" \
+            || echo "release 已存在, 跳过 (重跑幂等)"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   # MCP Registry 收录: server.json 里引用的 pypi 包版本会被 registry 校验真实存在,
   # 因此必须等 publish (PyPI) 成功后再发, 且要等 PyPI 索引对 CDN 生效。
   mcp-registry:
