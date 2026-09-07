@@ -9,6 +9,9 @@ parse_auto。这是"报文级深挖"对裸模型评测的碾压区 (大批量帧
 - scapy 是可选依赖 (pyproject eval extra), 未安装时给出明确安装提示
 - protocol 缺省时**逐流**判别 (每条 TCP 流独立按"该流完整帧数最多的协议"
   选型, 混合协议抓包互不干扰); 单流切不出完整帧时退回全局最优
+- 输出有 token 预算上限 (_PCAP_OUTPUT_BUDGET_BYTES): 超出时按流序/帧序
+  截断, 末尾 sentinel 流带 truncated 标记与 total 计数 (tests/
+  test_token_budget.py 钉住)
 """
 
 from __future__ import annotations
@@ -20,6 +23,13 @@ from plctap.models import PcapFlow, PcapFrame, ParseResult
 from plctap.protocols.auto import parse_auto
 
 _PROTOCOLS = ("modbus", "fins", "melsec")
+
+# 单次调用的输出预算 (v0.6 token 预算, tests/test_token_budget.py 钉住):
+# 装帧时按 PcapFrame 序列化字节累加, 放不下即停, 截断以 sentinel 流收尾
+# (flow 以 "truncated:" 开头, 带 total/shown 计数)。64KB ≈ 80 帧 modbus
+# 均价帧, Agent 可逐帧消化; 合法最大单帧 (FINS/MELSEC 16KB 读满数据)
+# 解析实测约 59KB, 必然放得下 —— 正常抓包不会出现 0 帧输出。
+_PCAP_OUTPUT_BUDGET_BYTES = 64 * 1024
 
 
 class _DirBuffer:
@@ -51,7 +61,13 @@ class _DirBuffer:
 
 
 def parse_pcap_file(path: str, protocol: str | None = None) -> list[PcapFlow]:
-    """解析 pcap, 返回按流分组的帧序列。protocol 缺省自动判别。"""
+    """解析 pcap, 返回按流分组的帧序列。protocol 缺省自动判别。
+
+    输出受 _PCAP_OUTPUT_BUDGET_BYTES 预算约束 (MCP token 预算): 按流序/
+    帧序装帧, 超出即停。截断时末尾追加一条 sentinel 流: flow 以
+    "truncated:" 开头并带 total/shown 计数, frames 为空 —— 拿其余帧请
+    用 protocol= 过滤或拆分 pcap 后再解析。
+    """
     try:
         from scapy.all import rdpcap
     except ImportError as e:  # pragma: no cover - 依赖缺失提示
@@ -81,33 +97,73 @@ def parse_pcap_file(path: str, protocol: str | None = None) -> list[PcapFlow]:
     if protocol is not None and protocol not in _PROTOCOLS:
         raise ValueError(f"unsupported protocol {protocol!r}; known: {_PROTOCOLS}")
 
-    result: list[PcapFlow] = []
+    # 第一遍: 逐流切帧 (便宜, 不 parse), 统计总帧数并暂存切帧结果;
+    # parse_auto 才是贵的那步, 留到第二遍按预算装, 不为装不下的帧白算
+    flow_labels: list[str] = []
+    flow_protos: list[str] = []
+    flow_chunks: list[list[tuple[bytes, bool]]] = []  # (帧字节, 是否尾部半帧)
+    total = 0
     for (src, sport, dst, dport), bufs in sorted(flows.items()):
         label = f"{src}:{sport} -> {dst}:{dport}"
         # 逐流判别: 混合协议 pcap 中每条流独立选型 (FINS 流不再被 modbus 淹没)
         flow_proto = protocol or _autodetect_flow(bufs)
-        frames: list[PcapFrame] = []
+        chunk: list[tuple[bytes, bool]] = []
         for name in ("forward", "reverse"):
             buf = bufs[name]
             payload = b"".join(buf.parts)
             complete, tail = streams.split_frames(flow_proto, payload)
-            for fr in complete:
-                frames.append(PcapFrame(frame_hex=fr.hex(), parsed=parse_auto(flow_proto, fr)))
+            chunk.extend((fr, False) for fr in complete)
             if tail:
-                frames.append(
-                    PcapFrame(
-                        frame_hex=tail.hex(),
-                        partial=True,
-                        parsed=ParseResult(
-                            protocol=flow_proto,
-                            direction="resp",
-                            valid=False,
-                            errors=[f"partial tail frame, {len(tail)} bytes (capture cut?)"],
-                        ),
-                    )
+                chunk.append((tail, True))  # 尾部半帧也计入 total (partial 在第二遍打标)
+        flow_labels.append(label)
+        flow_protos.append(flow_proto)
+        flow_chunks.append(chunk)
+        total += len(chunk)
+
+    # 第二遍: 按预算装帧。序列化大小用 model_dump_json 精确计量,
+    # 保证"预算内"是硬数字而不是估算
+    shown = 0
+    used = 0
+    truncated = False
+    result: list[PcapFlow] = []
+    for label, flow_proto, chunk in zip(flow_labels, flow_protos, flow_chunks):
+        frames: list[PcapFrame] = []
+        for data, is_tail in chunk:
+            if is_tail:
+                pf = PcapFrame(
+                    frame_hex=data.hex(),
+                    partial=True,
+                    parsed=ParseResult(
+                        protocol=flow_proto,
+                        direction="resp",
+                        valid=False,
+                        errors=[f"partial tail frame, {len(data)} bytes (capture cut?)"],
+                    ),
                 )
+            else:
+                pf = PcapFrame(frame_hex=data.hex(), parsed=parse_auto(flow_proto, data))
+            sz = len(pf.model_dump_json())
+            if used + sz > _PCAP_OUTPUT_BUDGET_BYTES:
+                truncated = True
+                break
+            used += sz
+            frames.append(pf)
+            shown += 1
         if frames:
             result.append(PcapFlow(flow=label, frames=frames))
+        if truncated:
+            break
+    if truncated:
+        # sentinel 流: truncated 标记 + total/shown 计数 (frames 为空,
+        # 不伪造帧数据; flow 前缀 "truncated:" 便于 Agent 快速识别)
+        result.append(PcapFlow(
+            flow=(
+                f"truncated: total {total} frames, showing first {shown} "
+                f"(output budget {_PCAP_OUTPUT_BUDGET_BYTES} bytes); "
+                "use protocol= filter or split the pcap for the rest"
+            ),
+            frames=[],
+        ))
     return result
 
 

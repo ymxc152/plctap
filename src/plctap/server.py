@@ -345,6 +345,9 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         诊断信息)。protocol 缺省时按"完整帧数最多的协议"自动判别。
         需要可选依赖 scapy (uv sync --extra eval)。大批量帧场景比逐条
         frame_hex 高效得多。
+        输出受 64KB token 预算约束: 超出时按流序/帧序装帧并截断, 末尾追加
+        一条 flow 以 "truncated:" 开头的 sentinel 流 (frames 为空, 带
+        total/shown 计数)。需要其余帧时用 protocol= 过滤或拆分 pcap 再解析。
         """
         from plctap import pcap
 
