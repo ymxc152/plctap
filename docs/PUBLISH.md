@@ -34,7 +34,12 @@
 - 官方 Registry (registry.modelcontextprotocol.io): **不用注册账号、无任何前置**。
   server.json 的 name `io.github.ymxc152/plctap` 就是 GitHub 身份声明, CI 里
   `mcp-publisher login github-oidc` 用 Actions OIDC 换凭证发布 (与 PyPI 一样无密钥)。
-- 聚合收录站 (最后做也行): glama.ai / mcp.so / Pulse 各注册一个账号。
+- glama.ai: **自动收录、自动更新, 发版零动作**。爬 GitHub/PyPI 自动发现并收录
+  (plctap 未手动提交即被收录), 定期跑 MCP 巡检抓取工具 schema 变更并同步版本
+  (v0.4.0 发布当日即同步)。无发布 API 可调, CI 无需任何步骤; 可选一次性在浏览器
+  登录 GitHub 认领 (Claim) 该条目, 认领后可编辑描述/图标等元数据——与版本自动
+  更新无关。
+- mcp.so / Pulse: 需手动注册账号提交表单 (见阶段 3)。
 
 ## 阶段 1: 每次发版 (固定动作)
 
@@ -76,12 +81,12 @@ README 里补一句即可。若以后想在 `uvx` 后一行装 skill, 再加一�
 - [x] README 首屏徽章已加 (CI + PyPI 版本 + MCP Registry + License)
 - [x] ~~三端接入截图~~ 取消: 接入配置样例已足够说明, 不再需要截图
 
-## 阶段 3: MCP 收录站提交 (每个站一条)
+## 阶段 3: 剩余收录站提交 (mcp.so / Pulse, 每站一条)
 
-- 官方 Registry 已由 CI 在每次打 tag 时自动发布, 无需手动提交; 本阶段只剩聚合收录站
+- 官方 Registry (CI 自动) 与 glama.ai (爬虫自动收录/更新) 均无需手动操作
 - 提交内容: 名称 `plctap` / 一句话描述 / 服务器 URL (npm 的填 `plctap`)
-- 描述建议: `Agent-PLC MCP server: probe, read, write and diagnose Modbus TCP / FINS / MELSEC PLCs`
-- 三个站各自"提交"表单, 填完等收录 (一般 1-3 个工作日)
+- 描述建议: `Agent-PLC MCP server: probe, read, write and diagnose Modbus TCP / FINS / MELSEC / S7 PLCs`
+- 两个站各自"提交"表单, 填完等收录 (一般 1-3 个工作日)
 
 ## 安全检查 (每次发版前过一遍)
 
