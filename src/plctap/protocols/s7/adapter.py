@@ -219,7 +219,8 @@ class S7Adapter(ProtocolAdapter):
     # ------------------------------------------------------------ write
 
     async def write(
-        self, target: Target, address: int, values: list[int], **options
+        self, target: Target, address: int, values: list[int],
+        *, on_frame=None, **options,
     ) -> dict:
         timeout = self.timeout(options.get("timeout_ms"))
         area = options.get("area", "DB")
@@ -229,6 +230,9 @@ class S7Adapter(ProtocolAdapter):
 
         pdu_ref = next(_pdu_ref_counter)
         request = codec.build_write_request(area, db_number, address, values, pdu_ref)
+        if on_frame is not None:
+            # 审计先于发送 (D5): 连接失败也留痕, 与 modbus/fins/melsec 适配器一致
+            on_frame(request.hex())
         started = time.perf_counter()
 
         async with self.pool.lock_for(self.key_for(target)):

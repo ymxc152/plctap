@@ -133,6 +133,25 @@ async def test_audit_log_written_on_write_call(tmp_path):
     assert "1000000001020001" in text
 
 
+async def test_audit_log_written_on_s7_write(tmp_path):
+    """D5 红线回归: s7 写同样逐帧审计 (s7 适配器曾漏调 on_frame, 绕过审计)。"""
+    log = tmp_path / "audit.jsonl"
+    app = create_app(
+        PlctapConfig(allow_write=True, audit_log=log, default_timeout_ms=150)
+    )
+    async with Client(app) as client:
+        # 端口 1 无从站: 帧已构建并审计, 随后握手失败
+        with pytest.raises(Exception):
+            await client.call_tool(
+                "plc_write",
+                {"protocol": "s7", "host": "127.0.0.1", "port": 1, "address": 20, "value": 1,
+                 "options": {"area": "DB", "db_number": 1}},
+            )
+    text = log.read_text(encoding="utf-8")
+    assert log.exists() and '"tool": "plc_write"' in text
+    assert "s7://127.0.0.1:1" in text
+
+
 def test_main_runs_stdio_without_banner(monkeypatch):
     """Windows MCP 客户端对 stderr UTF-8 敏感; FastMCP 启动横幅必须关闭。"""
     import plctap.server as server_module
