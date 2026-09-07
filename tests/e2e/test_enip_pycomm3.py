@@ -11,6 +11,9 @@ CI 无 pycomm3 时自动跳过 (e2e extra 含 pycomm3)。
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +23,16 @@ from pycomm3.cip.data_types import UINT  # noqa: E402
 
 from plctap.config import PlctapConfig  # noqa: E402
 from plctap.listener import ListenerRegistry  # noqa: E402
+
+
+def _fake_enip_server_cls():
+    """tests/ 非可导入包 (无 __init__.py), 按文件路径加载适配器测试里的假服务器。"""
+    path = Path(__file__).resolve().parents[1] / "test_adapter_enip.py"
+    spec = importlib.util.spec_from_file_location("_fake_enip_for_e2e", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod.FakeEnipServer
 
 
 def test_pycomm3_client_parses_plctap_listener_frames():
@@ -67,8 +80,9 @@ def test_plctap_adapter_reads_own_fixture():
         from plctap.config import PlctapConfig
         from plctap.conn.manager import ConnectionPool
         from plctap.models import Target
-        from tests.test_adapter_enip import FakeEnipServer
         from plctap.protocols.enip.adapter import EnipAdapter
+
+        FakeEnipServer = _fake_enip_server_cls()
 
         s = FakeEnipServer()
         host, port = await s.start()
