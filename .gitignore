@@ -25,7 +25,7 @@ issue-evidence/
 
 # eval 生成物 (可再生)
 eval/prompts.jsonl
-eval/results_baseline.json
+eval/results_baseline*.json
 
 # C# 台架编译产物 (tests/e2e/bench_iec104, dotnet build 可再生)
 tests/e2e/bench_*/bin/
