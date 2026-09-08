@@ -119,7 +119,9 @@ class ProxyRegistry:
         pr = self._proxies.get(port)
         if pr is None:
             raise ValueError(f"no proxy on port {port}")
-        return list(pr.frames[-limit:])
+        # 语义同监听器: 取最新 limit 条; limit<=0 显式返回空 ([-0:] 即全量的陷阱)
+        n = min(max(int(limit), 0), _PROXY_FRAME_LIMIT)
+        return list(pr.frames[-n:]) if n else []
 
     def active_ports(self) -> list[int]:
         return sorted(self._proxies)

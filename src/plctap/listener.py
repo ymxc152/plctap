@@ -197,7 +197,10 @@ class ListenerRegistry:
         lst = self._listeners.get(port)
         if lst is None:
             raise ValueError(f"no listener on port {port}")
-        return list(lst.frames[-limit:])
+        # 语义: 取最新 limit 条; 上限=环形缓冲。limit<=0 显式返回空
+        # (切片 [-0:] 即全量的陷阱, 不留给调用方)
+        n = min(max(int(limit), 0), _LISTENER_FRAME_LIMIT)
+        return list(lst.frames[-n:]) if n else []
 
     def active_ports(self) -> list[int]:
         return sorted(self._listeners)

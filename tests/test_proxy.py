@@ -245,3 +245,18 @@ async def test_proxy_target_down(registry):
 async def test_proxy_unsupported_protocol(registry):
     with pytest.raises(ValueError, match="S7 TPKT"):
         await registry.start("s7", "127.0.0.1", 0, "127.0.0.1", 1)
+
+
+def test_frames_limit_edge_cases(registry):
+    """frames 切片语义 (同监听器): 取最新 N 条; limit<=0 显式返回空
+    (切片 [-0:] 即全量的陷阱); limit 超过环形缓冲时截到缓冲大小。"""
+    from types import SimpleNamespace
+
+    registry._proxies[61000] = SimpleNamespace(frames=[{"i": i} for i in range(5)])
+    try:
+        assert registry.frames(61000, limit=0) == []
+        assert registry.frames(61000, limit=-3) == []
+        assert len(registry.frames(61000, limit=500)) == 5  # 超限截到缓冲大小
+        assert [f["i"] for f in registry.frames(61000, limit=2)] == [3, 4]  # 最新优先
+    finally:
+        registry._proxies.pop(61000, None)

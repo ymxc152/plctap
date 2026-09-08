@@ -445,7 +445,11 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     @mcp.tool
     async def get_listener_frames(port: int, limit: int = 100) -> list[dict]:
-        """取监听收下的帧 (direction/peer/frame_hex), 供 parse_frame/diagnose 分析。"""
+        """取监听收下的帧 (direction/peer/frame_hex), 供 parse_frame/diagnose 分析。
+
+        取最新 limit 条; 环形缓冲硬上限 1000 条 (limit 超限自动截到缓冲
+        大小, limit<=0 返回空) —— 输出量受 limit 与缓冲上限双重约束。
+        """
         return listeners.frames(port, limit)
 
     # ------------------------------------------------------------ 透明代理
@@ -477,7 +481,11 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     @mcp.tool
     async def get_proxy_frames(port: int, limit: int = 100) -> list[dict]:
-        """取代理录制的双向透传帧 (direction: c2s=上位机→PLC, s2c=PLC→上位机)。"""
+        """取代理录制的双向透传帧 (direction: c2s=上位机→PLC, s2c=PLC→上位机)。
+
+        取最新 limit 条; 环形缓冲硬上限 1000 条 (limit 超限自动截到缓冲
+        大小, limit<=0 返回空)。
+        """
         return proxies.frames(port, limit)
 
     # ------------------------------------------------------------ 设备自动识别

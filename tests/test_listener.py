@@ -302,6 +302,21 @@ async def test_inject_fins_end_code_after_handshake(registry):
     assert struct.unpack_from(">H", resp, 28)[0] == 0x1101  # ADDRESS_RANGE_ERROR
 
 
+def test_frames_limit_edge_cases(registry):
+    """frames 切片语义: 取最新 N 条; limit<=0 显式返回空 (切片 [-0:] 即全量的
+    陷阱, 不得把整个环形缓冲泼给调用方); limit 超过缓冲时截到缓冲大小。"""
+    from types import SimpleNamespace
+
+    registry._listeners[61000] = SimpleNamespace(frames=[{"i": i} for i in range(5)])
+    try:
+        assert registry.frames(61000, limit=0) == []
+        assert registry.frames(61000, limit=-3) == []
+        assert len(registry.frames(61000, limit=500)) == 5  # 超限截到缓冲大小
+        assert [f["i"] for f in registry.frames(61000, limit=2)] == [3, 4]  # 最新优先
+    finally:
+        registry._listeners.pop(61000, None)
+
+
 async def test_inject_fault_validation(registry):
     reg = registry
     with pytest.raises(ValueError, match="requires faults"):
