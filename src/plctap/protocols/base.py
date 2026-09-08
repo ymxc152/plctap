@@ -68,7 +68,7 @@ class ProtocolAdapter(ABC):
 
     @abstractmethod
     async def probe(self, target: Target) -> ProbeResult:
-        """连接测试 + 失败四分类 (PLAN.md 第 3 节)。"""
+        """连接测试 + 失败四分类。"""
 
     @abstractmethod
     async def read(

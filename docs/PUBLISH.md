@@ -75,7 +75,10 @@ uvx plctap                           # 任意机器一行装起来
 - **版本号语义 (0.x 阶段)**: minor = 功能批次 (v0.6.0 = 产品化收官批次), patch = 修复 (v0.6.1)
 - 累积期的变更账本 = commit 流 + PLAN.md 里程碑; 发版时 GitHub Release notes 自动按
   commits 生成, 值得讲的亮点 (如"台架抓出 S7 审计缺口")发版后手动润色到 release 页
-- 1.0: 语义定稿 (评测对比表滚动更新 + 产品化收官项齐了之后; 原条件中的双端截图已取消)
+- **稳定化纪律 (2026-09-08 起, 自 v0.7 生效)**: MCP 工具名/参数名/返回结构向后兼容,
+  新增只增不改; 破坏性变更三处提前标注 (docstring/README/Release notes) —— 详见
+  README「版本与兼容承诺」节。下一版 v0.7.0 仍按 minor=功能批次递增
+- 1.0 (语义定稿): 稳定化纪律经过至少一个完整发布周期验证后另行宣布; 不预设时间表
 
 ### GitHub Release notes 规则（强制——Release 页面永不空白）
 - 每次 tag 发版, CI (publish.yml 的 github-release job) 保证 Release 存在且 notes 非空:

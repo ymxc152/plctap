@@ -232,6 +232,18 @@ calibrated at their own time — the same model name is not the same conditions.
 exactly (temperature=0); per-tier numbers shuffle slightly. Full matrix and methodology:
 [eval/README.md](eval/README.md).
 
+## Versioning & compatibility promise
+
+Stability discipline applies from v0.7 on:
+- **Backwards compatibility**: MCP tool names, parameter names, and each tool's response shape stay
+  compatible; new protocol endpoints, new tools, and new optional parameters are additive only.
+- **Breaking changes**: if unavoidable, they are flagged in advance in the tool docstring, this README,
+  and the Release notes, with a migration window where feasible.
+- **Not covered**: internal module layout of `src/plctap`, diagnostic knowledge-base entry counts, and
+  evaluation numbers evolve normally between versions.
+- Announcing 1.0 (semantic freeze) requires the discipline above to hold for at least one full release
+  cycle; it will be announced separately.
+
 ## License
 
 MIT

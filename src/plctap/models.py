@@ -60,7 +60,7 @@ class CheckResult(BaseModel):
 
 
 class ProbeResult(BaseModel):
-    """probe_device 输出: 连通性探测 + 四类失败归因 (PLAN.md 第 3 节)。
+    """probe_device 输出: 连通性探测 + 四类失败归因。
 
     reachable 语义 = 传输层可达 (TCP 已建立)。设备回异常响应
     (exception_response) 说明设备在线且协议栈正常, 此时 reachable=True,

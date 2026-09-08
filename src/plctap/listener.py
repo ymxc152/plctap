@@ -1,4 +1,4 @@
-"""钓鱼模式监听 (M3 基础两档, PLAN.md 能力地图 + HANDOFF 决策 7)。
+"""钓鱼模式监听 (record_only / respond_normal 起步, v0.4 增 inject_errors)。
 
 场景: 待测设备只能当 client 时, 起一个假 server 让设备来连, 钓出它的帧
 行为, 再用 get_listener_frames + parse_frame/diagnose 逐帧分析。

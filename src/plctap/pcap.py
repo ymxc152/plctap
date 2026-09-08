@@ -1,4 +1,4 @@
-"""parse_pcap: Wireshark 导出 pcap 的结构化解析 (M3, PLAN.md 能力地图)。
+"""parse_pcap: Wireshark 导出 pcap 的结构化解析 (逐流聚合 + 逐流协议判别)。
 
 做法: TCP 载荷按五元组流聚合 -> 每方向按 streams.py 分帧 -> 逐帧
 parse_auto。这是"报文级深挖"对裸模型评测的碾压区 (大批量帧/冷门协议)。

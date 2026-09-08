@@ -434,7 +434,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         fins/melsec 可选 end_code/bad_length, 全协议通用 garbage。
         收下的帧用 get_listener_frames 取, 再喂 parse_frame/diagnose。
         port=0 由系统分配, 返回实际端口。建议收满样本后 stop_listener,
-        并提醒用户恢复设备原配置 (BUILD.md Skill 节)。
+        并提醒用户恢复设备原配置。
         """
         return await listeners.start(protocol, host, port, mode, idle_timeout_sec, faults)
 
@@ -501,7 +501,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         —— 例如 S7 PUT/GET 被关闭时识别照样成功, 读 DB 仍可能失败。
         返回 DetectResult: candidates 按置信度降序 (同级先验匹配端口优先,
         next_step 可直接作为 plc_read 调用), unknown_services 为开放但
-        四协议都不认识的端口 (可用 start_listener 钓帧分析)。
+        已注册协议都不认识的端口 (可用 start_listener 钓帧分析)。
         """
         return await detector.detect(host, ports=ports, timeout_ms=timeout_ms, deep=deep)
 
@@ -556,12 +556,12 @@ def _register_write_tools(
           支持 3e/4E × binary/ascii; 1401 批量写字, 位软元件按打包字写
           (每字 16 点)。
 
-        返回 {"request_frame", "response_frame", "elapsed_ms"}。
-        完整请求帧在发送前写入审计日志 (D5: 失败也留痕)。
-
         EtherNet/IP: address 为 tag 名字符串 (如 "alpha[0]"); values
         (options.values 或 [value]) 为 16 位字序列, 整数默认 DINT,
         浮点需显式 options.type="REAL"。
+
+        返回 {"request_frame", "response_frame", "elapsed_ms"}。
+        完整请求帧在发送前写入审计日志 (D5: 失败也留痕)。
         """
         _validate_address(protocol, address)
         opts = options or {}
