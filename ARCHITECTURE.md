@@ -120,6 +120,42 @@ class ProbeResult(BaseModel):
 class DiagnosticReport(BaseModel):
     candidates: list[Candidate]  # symptom/evidence/confidence/suggested_action
     next_tools: list[str]        # 建议Agent接下来调用的工具
+
+# v0.7 稳定化: 此前返回裸 dict 的工具全部收编建模 (wire 键集合不变,
+# tests/test_tool_shapes.py 黄金锁定); 全部 extra="forbid"。
+class WriteResult(BaseModel):
+    request_frame: str
+    response_frame: str
+    elapsed_ms: int
+
+class BrowseChild(BaseModel):
+    node_id: str
+    display_name: str | None
+    node_class: str
+
+class BrowseResult(BaseModel):
+    node: str
+    children: list[BrowseChild]
+    total: int
+    shown: int
+    truncated: bool
+
+class FrameRecord(BaseModel):
+    ts: str                      # get_listener_frames / get_proxy_frames 共用
+    direction: str
+    peer: str
+    frame_hex: str
+
+class ListenerStartResult / ListenerStopResult / ProxyStartResult /
+ProxyStopResult:                       # 各 3-6 个标量字段 (状态/端口/统计)
+class ListProtocolsResult(BaseModel):
+    protocols: dict[str, dict[str, Any]]  # 内条目自由形态 dict (meta 条件键"缺键而非 null")
+    allow_write: bool
+    hint: str
+```
+
+**返回建模约定**：新工具返回必须 pydantic 建模并加 `extra="forbid"`，同时在
+tests/test_tool_shapes.py 登记黄金键集合（见 docs/ADD_PROTOCOL.md）。
 ```
 
 ## 5. 数据流走查

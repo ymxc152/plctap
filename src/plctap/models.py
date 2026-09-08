@@ -141,3 +141,107 @@ class PcapFlow(BaseModel):
     frames: list[PcapFrame] = []
 
 
+# ---------------------------------------------------------------- v0.7 稳定化:
+# 以下模型把此前返回裸 dict 的工具收编为建模返回。铁律 = wire 键集合与值语义
+# 与建模前逐键一致 (tests/test_tool_shapes.py 黄金键集合锁定); extra="forbid"
+# 让构造期就对不上键的漂移直接报错, 而不是静默丢键。
+
+
+class _Frozen(BaseModel):
+    """建模返回的公共基座: 多余键禁止 (黄金锁)。"""
+
+    model_config = {"extra": "forbid"}
+
+
+class WriteResult(_Frozen):
+    """plc_write 输出 (五协议 adapter 统一三键)。"""
+
+    request_frame: str
+    response_frame: str
+    elapsed_ms: int
+
+
+class BrowseChild(BaseModel):
+    """plc_browse children 的单条子节点。"""
+
+    model_config = {"extra": "forbid"}
+
+    node_id: str
+    display_name: str | None = None
+    node_class: str
+
+
+class BrowseResult(_Frozen):
+    """plc_browse 输出: 一层子节点 + 预算截断计数。"""
+
+    node: str
+    children: list[BrowseChild] = []
+    total: int
+    shown: int
+    truncated: bool
+
+
+class FrameRecord(BaseModel):
+    """get_listener_frames / get_proxy_frames 共用的单帧记录。"""
+
+    model_config = {"extra": "forbid"}
+
+    ts: str
+    direction: str
+    peer: str
+    frame_hex: str
+
+
+class ListenerStartResult(_Frozen):
+    """start_listener 输出。"""
+
+    status: str
+    protocol: str
+    host: str
+    port: int
+    mode: str
+    faults: list[str] = []
+    recorded: int
+
+
+class ListenerStopResult(_Frozen):
+    """stop_listener 输出: 收帧统计。"""
+
+    status: str
+    port: int
+    mode: str
+    recorded: int
+    sent: int
+
+
+class ProxyStartResult(_Frozen):
+    """start_proxy 输出。"""
+
+    status: str
+    protocol: str
+    listen_port: int
+    target: str
+    recorded: int
+    hint: str
+
+
+class ProxyStopResult(_Frozen):
+    """stop_proxy 输出: 双向录制统计。"""
+
+    status: str
+    port: int
+    target: str
+    recorded: int
+    c2s: int
+    s2c: int
+
+
+class ListProtocolsResult(_Frozen):
+    """list_protocols 输出: 外层三键锁定; protocols 内条目保持自由形态
+    dict (meta 条件键"缺键而非 null"——建模会把缺键变 null, wire 即变)。"""
+
+    protocols: dict[str, dict[str, Any]]
+    allow_write: bool
+    hint: str
+
+

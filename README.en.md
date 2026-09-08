@@ -236,7 +236,9 @@ exactly (temperature=0); per-tier numbers shuffle slightly. Full matrix and meth
 
 Stability discipline applies from v0.7 on:
 - **Backwards compatibility**: MCP tool names, parameter names, and each tool's response shape stay
-  compatible; new protocol endpoints, new tools, and new optional parameters are additive only.
+  compatible. Response shapes are defined and locked by pydantic models
+  (`tests/test_tool_shapes.py` golden checks; exception: the `protocols` entries of list_protocols
+  remain free-form dicts); new protocol endpoints, new tools, and new optional parameters are additive only.
 - **Breaking changes**: if unavoidable, they are flagged in advance in the tool docstring, this README,
   and the Release notes, with a migration window where feasible.
 - **Not covered**: internal module layout of `src/plctap`, diagnostic knowledge-base entry counts, and

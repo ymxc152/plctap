@@ -13,14 +13,22 @@ from plctap.config import PlctapConfig
 from plctap.conn.manager import ConnectionPool
 from plctap.models import (
     ByteOrder,
+    BrowseResult,
     CheckResult,
     DiagnosticReport,
+    FrameRecord,
+    ListProtocolsResult,
+    ListenerStartResult,
+    ListenerStopResult,
     PcapFlow,
     ParseResult,
     ProbeResult,
+    ProxyStartResult,
+    ProxyStopResult,
     RawExchange,
     ReadResult,
     Target,
+    WriteResult,
 )
 from plctap.protocols.base import ProtocolAdapter, adapter_for, known_protocols
 from plctap.protocols.fins.adapter import FinsAdapter  # noqa: F401  # 注册副作用
@@ -89,7 +97,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
     # ------------------------------------------------------------ 能力自述
 
     @mcp.tool
-    def list_protocols() -> dict:
+    def list_protocols() -> ListProtocolsResult:
         """列出本 server 支持的工业协议及其能力。
 
         返回每个协议的端口提示、地址模型、数据类型和品牌线索,
@@ -121,11 +129,11 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
                     "read_options": meta.read_options,
                 })
             protocols[name] = entry
-        return {
-            "protocols": protocols,
-            "allow_write": config.allow_write,
-            "hint": "根据 vendor_hints 和 port_hints 匹配设备; 无法确定时向用户确认品牌",
-        }
+        return ListProtocolsResult(
+            protocols=protocols,
+            allow_write=config.allow_write,
+            hint="根据 vendor_hints 和 port_hints 匹配设备; 无法确定时向用户确认品牌",
+        )
 
     # ------------------------------------------------------------ 连接层
 
@@ -205,7 +213,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         limit: int = 200,
         unit: int = 1,
         timeout_ms: int | None = None,
-    ) -> dict:
+    ) -> BrowseResult:
         """浏览地址空间: 从 node 展开一层子节点 (诊断场景的"列目录")。
 
         返回 {node, children, total, shown, truncated}: children 每项含
@@ -226,12 +234,13 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             raise ValueError(
                 f"{protocol} browse 未实现 (plc_browse 当前支持 {supported}); 详见 list_protocols"
             )
-        return await adapter_cls(pool, config).browse(
+        d = await adapter_cls(pool, config).browse(
             Target(protocol=protocol, host=host, port=port, unit=unit),
             node=node,
             limit=limit,
             timeout_ms=timeout_ms,
         )
+        return BrowseResult(**d)
 
     # ------------------------------------------------------------ 诊断层
 
@@ -423,7 +432,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         mode: str = "record_only",
         idle_timeout_sec: int = 120,
         faults: list[str] | None = None,
-    ) -> dict:
+    ) -> ListenerStartResult:
         """起钓鱼模式监听: 待测设备只能当 client 时, 立假 server 钓出它的帧行为。
 
         mode 三档: record_only=只收帧不回复 (纯被动) / respond_normal=对读类
@@ -436,21 +445,23 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         port=0 由系统分配, 返回实际端口。建议收满样本后 stop_listener,
         并提醒用户恢复设备原配置。
         """
-        return await listeners.start(protocol, host, port, mode, idle_timeout_sec, faults)
+        return ListenerStartResult(
+            **await listeners.start(protocol, host, port, mode, idle_timeout_sec, faults)
+        )
 
     @mcp.tool
-    async def stop_listener(port: int) -> dict:
+    async def stop_listener(port: int) -> ListenerStopResult:
         """停掉指定端口的监听, 返回收/发帧统计。"""
-        return await listeners.stop(port)
+        return ListenerStopResult(**await listeners.stop(port))
 
     @mcp.tool
-    async def get_listener_frames(port: int, limit: int = 100) -> list[dict]:
+    async def get_listener_frames(port: int, limit: int = 100) -> list[FrameRecord]:
         """取监听收下的帧 (direction/peer/frame_hex), 供 parse_frame/diagnose 分析。
 
         取最新 limit 条; 环形缓冲硬上限 1000 条 (limit 超限自动截到缓冲
         大小, limit<=0 返回空) —— 输出量受 limit 与缓冲上限双重约束。
         """
-        return listeners.frames(port, limit)
+        return [FrameRecord(**f) for f in listeners.frames(port, limit)]
 
     # ------------------------------------------------------------ 透明代理
 
@@ -462,7 +473,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         listen_host: str = "127.0.0.1",
         listen_port: int = 0,
         idle_timeout_sec: int = 120,
-    ) -> dict:
+    ) -> ProxyStartResult:
         """起透明代理: 上位机 → 代理 → 真实 PLC, 透传同时按协议分帧录制双向帧。
 
         现场联调时把上位机目标地址改成本代理, 无需 Wireshark 即可拿到全部
@@ -470,23 +481,25 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         protocol 当前支持 modbus/fins/melsec (S7 TPKT 分帧暂不支持);
         listen_port=0 由系统分配。代理是诊断设施: 只透传与录制, 不改写帧。
         """
-        return await proxies.start(
-            protocol, listen_host, listen_port, target_host, target_port, idle_timeout_sec
+        return ProxyStartResult(
+            **await proxies.start(
+                protocol, listen_host, listen_port, target_host, target_port, idle_timeout_sec
+            )
         )
 
     @mcp.tool
-    async def stop_proxy(port: int) -> dict:
+    async def stop_proxy(port: int) -> ProxyStopResult:
         """停掉指定端口的代理, 返回录制统计 (c2s/s2c 帧数)。"""
-        return await proxies.stop(port)
+        return ProxyStopResult(**await proxies.stop(port))
 
     @mcp.tool
-    async def get_proxy_frames(port: int, limit: int = 100) -> list[dict]:
+    async def get_proxy_frames(port: int, limit: int = 100) -> list[FrameRecord]:
         """取代理录制的双向透传帧 (direction: c2s=上位机→PLC, s2c=PLC→上位机)。
 
         取最新 limit 条; 环形缓冲硬上限 1000 条 (limit 超限自动截到缓冲
         大小, limit<=0 返回空)。
         """
-        return proxies.frames(port, limit)
+        return [FrameRecord(**f) for f in proxies.frames(port, limit)]
 
     # ------------------------------------------------------------ 设备自动识别
 
@@ -541,7 +554,7 @@ def _register_write_tools(
         point_type: str = "register",
         timeout_ms: int | None = None,
         options: dict | None = None,
-    ) -> dict:
+    ) -> WriteResult:
         """写数据点 (危险操作: 需要用户明确授权)。
 
         Modbus:
@@ -590,7 +603,7 @@ def _register_write_tools(
         # _function_code 仅 Modbus 语义 (fc05/06/16); 其他协议不传, 避免吞掉
         # 基类的 "write not implemented" 明确报错
         extra = {"_function_code": function_code} if protocol in ("modbus", "modbus_rtu") else {}
-        return await adapter.write(
+        d = await adapter.write(
             Target(protocol=protocol, host=host, port=port, unit=unit),
             address,
             values,
@@ -604,6 +617,7 @@ def _register_write_tools(
             **extra,
             **opts,
         )
+        return WriteResult(**d)
 
     @mcp.tool
     async def send_frame(

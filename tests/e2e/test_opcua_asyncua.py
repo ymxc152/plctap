@@ -52,7 +52,7 @@ async def test_list_protocols_honest_capabilities(tmp_path, sim):
     port, _idx = sim
     async with Client(_app(tmp_path, allow_write=True)) as client:
         result = await client.call_tool("list_protocols", {})
-    entry = result.data["protocols"]["opcua"]
+    entry = result.data.protocols["opcua"]
     assert entry["write"] is False
     assert entry["send_raw"] is False
     assert entry["browse"] is True
@@ -92,14 +92,14 @@ async def test_plc_browse_via_tool(tmp_path, sim):
         root = await client.call_tool(
             "plc_browse", {"protocol": "opcua", "host": "127.0.0.1", "port": port}
         )
-        assert root.data["node"] == "ns=0;i=85"  # 缺省 Objects 文件夹
+        assert root.data.node == "ns=0;i=85"  # 缺省 Objects 文件夹
         big = await client.call_tool(
             "plc_browse",
             {"protocol": "opcua", "host": "127.0.0.1", "port": port,
              "node": f"ns={idx};s=Demo.Big"},
         )
-        assert big.data["total"] == 250 and big.data["shown"] == 200
-        assert big.data["truncated"]
+        assert big.data.total == 250 and big.data.shown == 200
+        assert big.data.truncated
         with pytest.raises(Exception, match="browse 未实现"):
             await client.call_tool(
                 "plc_browse",

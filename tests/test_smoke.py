@@ -56,7 +56,7 @@ async def test_list_protocols_contains_modbus(tmp_path):
     app = create_app(PlctapConfig(audit_log=tmp_path / "audit.jsonl"))
     async with Client(app) as client:
         result = await client.call_tool("list_protocols", {})
-    assert "modbus" in result.data["protocols"]
+    assert "modbus" in result.data.protocols
 
 
 async def test_parse_frame_request(tmp_path):
