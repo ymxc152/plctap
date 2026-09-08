@@ -152,3 +152,17 @@ def test_parse_response_list_identity_status_error():
     f[8:12] = struct.pack("<I", 0x01)
     p = codec.parse_response(bytes(f))
     assert not p.valid and any("INVALID_COMMAND" in e or "0x01" in e for e in p.errors)
+
+
+def test_parse_request_embedded_length_overdeclared():
+    """畸形 (fuzz 同源): Unconnected Send 声明的嵌入长度超过实际载荷 ——
+    不得产出负长度伪字段 (route_path 无从解出), 转结构化 errors 且 valid=False。"""
+    u = bytearray(codec.build_unconnected_send(codec.build_read_tag("alpha[0]", 1)))
+    declared = struct.unpack_from("<H", u, 1)[0]
+    struct.pack_into("<H", u, 1, declared + 8)  # 声明 8 字节并不存在的嵌入载荷
+    f = codec.build_send_rr_data(0x11223344, bytes(u))
+    p = codec.parse_request(f)
+    assert p.valid is False
+    assert any("shorter than declared" in e for e in p.errors)
+    assert not any(x.name == "route_path" for x in p.fields)
+

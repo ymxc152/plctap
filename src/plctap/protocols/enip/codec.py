@@ -425,8 +425,15 @@ def parse_request(frame: bytes) -> ParseResult:
                 fields.append(_f(frame, "embedded_service", embedded[0], off2 + 4, 1,
                                  f"Read Tag" if embedded[0] == SVC_READ_TAG else
                                  f"Write Tag" if embedded[0] == SVC_WRITE_TAG else f"{embedded[0]:#04x}"))
-                fields.append(_f(frame, "route_path", cip[3 + _elen:], off2 + 3 + _elen,
-                                 len(cip) - 3 - _elen, "背板 1 / 槽 0"))
+                if len(cip) >= 3 + _elen:
+                    fields.append(_f(frame, "route_path", cip[3 + _elen:], off2 + 3 + _elen,
+                                     len(cip) - 3 - _elen, "背板 1 / 槽 0"))
+                else:
+                    # 声明的嵌入长度超过实际载荷: 无 route_path 字节可解, 转证据
+                    errors.append(
+                        f"embedded request shorter than declared: have {len(embedded)}, "
+                        f"need {_elen}; no route path bytes remain"
+                    )
                 # 请求侧: 嵌入服务 = 读/写 tag, 解路径与参数
                 fields.extend(_parse_embedded_request(frame, embedded, off2 + 4))
             return ParseResult(protocol="enip", direction="req", fields=fields, valid=not errors, errors=errors)
