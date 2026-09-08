@@ -178,10 +178,10 @@ from plctap.protocols.your_protocol.adapter import YourAdapter  # noqa: F401
 - [ ] `parse_frame(protocol="your_protocol", ...)` 能正确解析
 - [ ] `diagnose(protocol="your_protocol", ...)` 能命中 KB 条目
 
-## 返回建模约定（v0.7 稳定化起强制）
+## 返回建模约定（v0.6.1 稳定化起强制）
 
 - 新工具的返回**必须 pydantic 建模**（models.py）并加 `extra="forbid"`——裸 dict
-  不允许进入工具返回（v0.6.0 前的 9 个 dict 工具已于 v0.7 收编为模型）。
+  不允许进入工具返回（v0.6.0 前的 9 个 dict 工具已于 v0.6.1 收编为模型）。
 - 在 `tests/test_tool_shapes.py` 登记黄金键集合：把该工具返回 dict 的键集合作为
   字面量锁死，`model_dump()` 必须与之逐键一致。
 - 与既有同族工具共用模型（如新帧式协议沿用既有返回形态）时免新增, 但不得改动

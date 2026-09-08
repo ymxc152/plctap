@@ -223,7 +223,7 @@ iec104 端点 / enip 端点 / opcua 端点) 未纳入基线。detect 档 (4 用�
 
 ## 版本与兼容承诺
 
-自 v0.7 起遵循稳定化纪律:
+自 v0.6.1 起遵循稳定化纪律:
 - **向后兼容**: MCP 工具名、参数名与各工具的返回结构保持兼容。返回结构由 pydantic 模型
   定义并锁定 (`tests/test_tool_shapes.py` 黄金校验; 例外: list_protocols 的 protocols
   条目为自由形态 dict); 新增协议端点、新增工具、新增可选参数只增不改。

@@ -121,7 +121,7 @@ class DiagnosticReport(BaseModel):
     candidates: list[Candidate]  # symptom/evidence/confidence/suggested_action
     next_tools: list[str]        # 建议Agent接下来调用的工具
 
-# v0.7 稳定化: 此前返回裸 dict 的工具全部收编建模 (wire 键集合不变,
+# v0.6.1 稳定化: 此前返回裸 dict 的工具全部收编建模 (wire 键集合不变,
 # tests/test_tool_shapes.py 黄金锁定); 全部 extra="forbid"。
 class WriteResult(BaseModel):
     request_frame: str

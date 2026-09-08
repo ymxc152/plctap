@@ -234,7 +234,7 @@ exactly (temperature=0); per-tier numbers shuffle slightly. Full matrix and meth
 
 ## Versioning & compatibility promise
 
-Stability discipline applies from v0.7 on:
+Stability discipline applies from v0.6.1 on:
 - **Backwards compatibility**: MCP tool names, parameter names, and each tool's response shape stay
   compatible. Response shapes are defined and locked by pydantic models
   (`tests/test_tool_shapes.py` golden checks; exception: the `protocols` entries of list_protocols
