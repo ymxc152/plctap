@@ -208,6 +208,30 @@ Conclusion: bare models already handle single-frame translation; the value gap c
 semantics and multi-fault mixed scenarios** — exactly where deterministic parsing + a structured knowledge base
 live. Methodology and re-run steps: [eval/README.md](eval/README.md).
 
+## Multi-model bare-baseline matrix (2026-09-08: 4 models × dual run × five tiers, 35 cases)
+
+| Model (strength) | run1 | run2 | No answer, run1/run2* |
+|---|---|---|---|
+| glm-5.3-flash (same as the Agent) | 13/35 | 13/35 | 12 / 11 |
+| glm-5-2 (strong) | 10/35 | 10/35 | 13 / 14 |
+| doubao-seed-turbo (weak) | 9/35 | 9/35 | 14 / 13 |
+| deepseek-v4-flash (medium) | 8/35 | 8/35 | 2 / 2 |
+| **plctap toolchain (control, same corpus)** | **35/35** | **35/35** | — |
+
+**Every bare model (weak/medium/strong/Agent-grade) lands in the 8–13/35 band with 0/96 across eight
+runs on the niche-protocol tier; with the plctap toolchain it is 49/49 (eight tiers), regardless of model
+strength.** Both failure modes are immunized by the tool layer: reasoning runaway (81 zero-output calls
+across eight runs; one case measured burning the full 32768 reasoning tokens with no text) and
+"fluent errors" (deepseek-v4-flash has only 2/2 no-answers yet the lowest total, going 0/12 on the
+FINS/MELSEC tier).
+
+\* No answer = zero model output (inference timeout), counted as FAIL (same policy as 2026-09-04). This
+matrix and the table above (2026-09-04, 24/35) are **not directly comparable**: different endpoints
+(Volcengine Ark vs local Codex proxy), possible server-side model drift, and scoring equivalence sets
+calibrated at their own time — the same model name is not the same conditions. Dual-run totals reproduce
+exactly (temperature=0); per-tier numbers shuffle slightly. Full matrix and methodology:
+[eval/README.md](eval/README.md).
+
 ## License
 
 MIT
