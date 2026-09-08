@@ -33,14 +33,14 @@ uv run python eval/baseline.py --answers answers.jsonl
 
 输出: 分档准确率 + `eval/results_baseline.json` (README 对比表数据源)。
 
-## 已发布结果 (裸模型跑分 2026-09-04, 语料版本 7cd6d14)
+## 已发布结果 (裸模型跑分 2026-09-04, 语料版本 317e868)
 
 - 基线: glm-5.3-flash @ 本地 Responses 兼容端点, temperature 0
 - 工具 35/35 vs 裸模型 24/35; 分档: 8/8, 4/5, 3/5, 5/12, 4/5
   (single_frame / integrity_crc / batch_log / fins_melsec / active_probe)
 - 6 例端点超时计 FAIL (披露于 README); 判分关键词为事实等价集 (| 语法),
   benchmark/baseline 两处实现已同步
-- fins 语料其后于 7608f47 (v0.2.0) 随 MELSEC 线上格式修正同步更新 (帧输入与判分
+- fins 语料其后于 b319374 (v0.2.0) 随 MELSEC 线上格式修正同步更新 (帧输入与判分
   关键词, 判分语义不变); 工具模式 2026-09-07 按当前语料复跑
 - v0.4 (2026-09-07): 新增 detect 档 4 例 (`corpus/detect.yaml`, 进程内假设备);
   v0.5.2: 新增 iec104 档 6 例 (`corpus/iec104.yaml`, 总召帧与 lib60870 官方实现

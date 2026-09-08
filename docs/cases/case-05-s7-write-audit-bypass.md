@@ -1,6 +1,6 @@
 # Case 05: S7 write 漏调 on_frame —— 测试全绿不等于安全闭环
 
-> 时间锚点: v0.5.5 修复 (2026-09-07, 提交 5e86d92, HANDOFF §5.18/§5.19) — 本项目唯一一次安全红线级线上缺陷
+> 时间锚点: v0.5.5 修复 (2026-09-07, 提交 5a4e76a, HANDOFF §5.18/§5.19) — 本项目唯一一次安全红线级线上缺陷
 > 相关代码: `src/plctap/protocols/s7/adapter.py` (write), `tests/test_smoke.py` (test_audit_log_written_on_s7_write), `docs/ADD_PROTOCOL.md` (防复发条款)
 > 地址: 127.0.0.1 台架; 审计日志路径 ~/.plctap/audit.jsonl
 
@@ -39,7 +39,7 @@ plctap 的安全模型有两道独立防线: **闸门** (PLCTAP_ALLOW_WRITE=fals
 
 ## 结论与修复
 
-提交 5e86d92 (2026-09-07, v0.5.5), 修复 + 回归 + 防复发三层:
+提交 5a4e76a (2026-09-07, v0.5.5), 修复 + 回归 + 防复发三层:
 
 1. **修复**: `write()` 签名补 `*, on_frame=None`; 请求帧构建后、**任何网络动作前**调用 `on_frame(request.hex())` —— 与 modbus/fins/melsec 语义逐字对齐。"任何网络动作前"是语义关键: 连接失败的写同样已经构成了"尝试写"这个事实。
 2. **回归**: 新增 `test_audit_log_written_on_s7_write` —— 对 127.0.0.1:1 (注定无从站) 发起 s7 写, 断言握手必然失败, **且审计日志里已出现完整帧记录** (`"tool": "plc_write"`, target 形如 `s7://127.0.0.1:1`)。用例名即规范: 写连接失败也必须留痕。
@@ -80,7 +80,7 @@ parse_frame(protocol="s7", frame_hex="0300001D02F0803203000000010002001F00000401
 回归测试 (仓库内可复跑):
 
 ```bash
-uv run pytest tests/test_smoke.py -k "audit" -q     # modbus 与 s7 写审计各一条, s7 条即 5e86d92 回归
+uv run pytest tests/test_smoke.py -k "audit" -q     # modbus 与 s7 写审计各一条, s7 条即 5a4e76a 回归
 ```
 
 ADD_PROTOCOL.md 的防复发条款位于 Step 3 注意事项末条 —— 接新协议写能力时按它逐字检查 write() 签名与 on_frame 调用时机。

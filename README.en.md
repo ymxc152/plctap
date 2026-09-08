@@ -195,8 +195,8 @@ uv run plctap      # start the stdio server locally
 \* The same corpus answered by both modes, identical except for the tools: bare model (glm-5.3-flash, no tools,
 temperature=0) answers directly; deterministic keyword scoring (fact-equivalence sets, shared by both modes);
 6 cases got no valid answer due to inference-endpoint timeouts and count as FAIL (excluding timeouts:
-24/29 = 82.8%). Bare-model run date 2026-09-04, corpus version 7cd6d14 (as of the run; the FINS corpus was
-afterwards updated in 7608f47 along with the wire-format fixes, scoring semantics unchanged).
+24/29 = 82.8%). Bare-model run date 2026-09-04, corpus version 317e868 (as of the run; the FINS corpus was
+afterwards updated in b319374 along with the wire-format fixes, scoring semantics unchanged).
 **Scope note**: the corpus was built at milestone M2 (v0.2 era), covering frame parsing / CRC integrity /
 mixed logs / niche protocol semantics / active-probe attribution; v0.3+ features (plc_write / parse_pcap /
 transparent proxy / modbus_rtu endpoint / vendor_hints / iec104 endpoint / enip endpoint / opcua endpoint) are not in the

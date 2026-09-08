@@ -1,6 +1,6 @@
 # Case 02: MELSEC frame_format 未贯穿收帧回调 —— 默认参数掩盖下的参数断链
 
-> 时间锚点: v0.2.0 全帧格式实装 → 2026-09-06 全量交叉验证修复 (提交 31de484, HANDOFF §5.12)
+> 时间锚点: v0.2.0 全帧格式实装 → 2026-09-06 全量交叉验证修复 (提交 84dad0a, HANDOFF §5.12)
 > 相关代码: `src/plctap/protocols/melsec/adapter.py` (_recv_frame / _RESP_SUBHEADER_TO_FORMAT), `src/plctap/protocols/base.py` (locked_exchange)
 > 帧样例: 本仓库 codec 合成帧 (红线 1), 台架地址 127.0.0.1
 
@@ -40,7 +40,7 @@ v0.2.0 宣称支持全部 4 种格式, 单测全绿。台架实测: **3E binary 
 
 ## 结论与修复
 
-提交 31de484 (2026-09-06), 三件事一起做:
+提交 84dad0a (2026-09-06), 三件事一起做:
 
 1. **显式绑定**: `functools.partial(self._recv_frame, frame_format=frame_format)` 把参数焊死在回调对象上, 不依赖调用方记得传。该纪律已写入 HANDOFF "新会话必读": 新协议加参数时用 partial 显式绑定。
 2. **auto 兜底**: `_recv_frame` 支持 `frame_format="auto"`, 按响应副头部判别 (`_RESP_SUBHEADER_TO_FORMAT`: D000/D400 二进制, "D0"/"D4" ASCII); `send_raw` 无法预知对端格式, 走 auto —— 副头部不匹配即报"流失步", 不静默错切。
