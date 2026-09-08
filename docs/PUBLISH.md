@@ -110,13 +110,18 @@ README 里补一句即可。若以后想在 `uvx` 后一行装 skill, 再加一�
 - [x] README 首屏徽章已加 (CI + PyPI 版本 + MCP Registry + License)
 - [x] ~~三端接入截图~~ 取消: 接入配置样例已足够说明, 不再需要截图
 
-## 阶段 3: 剩余收录站 (2026-09-07 定为观察项, 当前无待办动作)
+## 阶段 3: 剩余收录站 (观察项; 2026-09-09 发版后复查)
 
-- 官方 Registry (CI 自动, 0.4.0→0.5.5 多版本 active) 与 glama.ai (爬虫自动收录/同步版本) 均无需手动操作
-- **mcp.so**: 实测仅 $39 付费档收录, 用户决策跳过; 若后续愿付费, 提交内容如下备用
-- **Pulse**: 官方暂停接收 (其建议改投官方 Registry, 已在); 恢复后再评估
+- **官方 Registry**: CI 自动, 0.4.0→0.6.1 八条记录 active —— 无需操作 ✓
+- **glama.ai**: 自动收录, **但同步滞后 (2026-09-09 观察)**: 页面停在 v0.4.0 (09-06 巡检观测),
+  0.5.x/0.6.x 六个版本未跟上 —— 巡检周期可能长于发版节奏; 处置: 继续观察 1-2 周,
+  若仍滞后则用户 Claim 后看是否有手动触发/编辑入口
+- **mcp.so**: 仍未收录 (2026-09-09 搜索 0 结果, 自动爬虫未抓) —— 维持付费档跳过决策;
+  若后续愿付费, 提交内容如下备用
+- **Pulse (pulsemcp.com)**: /submit 页对自动化访问 403 (反爬), 无法自动核验是否恢复接收
+  —— 需用户浏览器偶尔回查
 - 备用提交内容: 名称 `plctap` / 一句话描述 / 服务器 URL (PyPI 包填 `plctap`)
-- 描述建议: `Agent-PLC MCP server: probe, detect, read, write and diagnose Modbus TCP/RTU, FINS, MELSEC, S7comm, IEC 104 and EtherNet/IP devices`
+- 描述建议: `Agent-PLC MCP server: probe, detect, read, write and diagnose Modbus TCP/RTU, FINS, MELSEC, S7comm, IEC 104, EtherNet/IP and OPC UA devices`
 
 ## 安全检查 (每次发版前过一遍)
 
