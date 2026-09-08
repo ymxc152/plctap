@@ -191,7 +191,7 @@ audit_log = "~/.plctap/audit.jsonl"
 - v1.1 : 服务端诊断套件(共享监听基础设施, codec.parse/build 反向复用):
            start_proxy  诊断代理: 上位机→代理→真实PLC 透明转发+录制
                         → 排查"上位机说没回 / PLC 说没发"扯皮场景
-           start_listener 钓鱼模式(实习真实痛点背书):
+           start_listener 钓鱼模式(真实运维场景背书):
                         待测设备只能当client时, 立假server钓出其帧行为
                         mode(已实现): record_only / respond_normal / inject_errors
                         (respond_scripted 可编程回帧留待需要时)

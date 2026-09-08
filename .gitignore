@@ -31,6 +31,11 @@ eval/results_baseline*.json
 tests/e2e/bench_*/bin/
 tests/e2e/bench_*/obj/
 
+# 内部过程文档 (canonical home: 仓库外 ../plctap-internal/, 不入云端; 历史版本仍在旧 commit 中)
+/PLAN.md
+/HANDOFF.md
+/BUILD.md
+
 # 验证工具链 (便携 JDK / 第三方模拟器源码, 体积大且可再生)
 tools/
 scripts/*.log
