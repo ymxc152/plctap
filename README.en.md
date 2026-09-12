@@ -29,6 +29,12 @@
 | Listen | `start_proxy` / `stop_proxy` / `get_proxy_frames` | Transparent proxy: host app → proxy → real PLC; forwards while framing and recording both directions — online debugging without Wireshark (modbus/fins/melsec) |
 | Execute | `plc_write` / `send_frame` | **Not registered by default**; enabled only with `PLCTAP_ALLOW_WRITE=true` (safety gate) |
 
+Every tool ships MCP annotations hints (locked key-by-key on the wire in `tests/test_tool_annotations.py`):
+pure local parsers are `readOnlyHint=true` / `openWorldHint=false`; network reads/probes/frame fetches are
+`readOnlyHint=true`; listener/proxy start/stop are non-read-only state changes (non-destructive, non-idempotent);
+write tools carry `destructiveHint=true` and are not registered by default — clients can use these to judge
+parallel safety and how much confirmation to require before calling.
+
 ## Write capability
 
 With `PLCTAP_ALLOW_WRITE=true`, six of the eight endpoints are writable (modbus_rtu shares the modbus semantics; iec104 and opcua are read-only):
@@ -207,6 +213,10 @@ see "Quality assurance").
 Conclusion: bare models already handle single-frame translation; the value gap concentrates in **niche protocol
 semantics and multi-fault mixed scenarios** — exactly where deterministic parsing + a structured knowledge base
 live. Methodology and re-run steps: [eval/README.md](eval/README.md).
+
+**Runtime boundary**: `eval/` is a development-time benchmark harness (bare-model baseline comparison)
+that needs `OPENAI_API_KEY` only when re-running evaluations; the published wheel ships only `src/plctap`
+— the MCP server runtime has zero AI/LLM dependency and never reads or requires any model-API credential.
 
 ## Multi-model bare-baseline matrix (2026-09-08: 4 models × dual run × five tiers, 35 cases)
 

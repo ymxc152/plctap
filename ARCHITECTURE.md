@@ -156,6 +156,11 @@ class ListProtocolsResult(BaseModel):
 
 **返回建模约定**：新工具返回必须 pydantic 建模并加 `extra="forbid"`，同时在
 tests/test_tool_shapes.py 登记黄金键集合（见 docs/ADD_PROTOCOL.md）。
+
+**工具 annotations 约定**：新工具注册时必须声明 `ToolAnnotations`，从 server.py 的
+`_ANN_*` 四分组选一（纯本地解析 / 联网只读 / 监听代理生命周期 / 写），不得裸
+`@mcp.tool`；黄金值逐工具锁定于 tests/test_tool_annotations.py，注册集合与黄金键
+集合双向覆盖，新工具不登记即挂测试。
 ```
 
 ## 5. 数据流走查

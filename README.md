@@ -31,6 +31,11 @@
 | 监听 | `start_proxy` / `stop_proxy` / `get_proxy_frames` | 透明代理: 上位机 → 代理 → 真实 PLC, 透传同时分帧录制双向帧, 在线联调免 Wireshark (modbus/fins/melsec) |
 | 执行 | `plc_write` / `send_frame` | **默认不注册**, `PLCTAP_ALLOW_WRITE=true` 才启用 (闸门) |
 
+全部工具带 MCP annotations hint (wire 逐键锁定于 `tests/test_tool_annotations.py`): 纯本地解析类
+`readOnlyHint=true` / `openWorldHint=false`, 联网读/探测/取帧类 `readOnlyHint=true`, 监听/代理
+启停为非只读状态变更 (非破坏、非幂等), 写类 `destructiveHint=true` 且默认不注册 —— 客户端可
+据此判断并行安全性与调用前确认级别。
+
 ## 写能力
 
 `PLCTAP_ALLOW_WRITE=true` 后八端点中六个可写 (modbus_rtu 与 modbus 同轨同语义; iec104 与 opcua 仅读):
@@ -200,6 +205,10 @@ iec104 端点 / enip 端点 / opcua 端点) 未纳入基线。detect 档 (4 用�
 形式, 故未纳入对比 —— 工具模式八档合计 49/49 (2026-09-07 按当前语料复跑, 见「质量保障」)。
 结论: 单帧翻译裸模型已能胜任, **价值差距集中在冷门协议语义与多故障混排场景** ——
 这正是确定性解析 + 结构化知识库的所在。方法学与复跑步骤见 [eval/README.md](eval/README.md)。
+
+**运行时边界**: `eval/` 是开发期基准测试 harness (裸模型基线对比), 仅复跑评测时需要
+`OPENAI_API_KEY`; 发布产物只含 `src/plctap` —— MCP server 运行时零 AI/LLM 依赖,
+不读也不需要任何模型 API 凭据。
 
 ## 多模型裸基线矩阵 (2026-09-08: 4 模型 × 双跑 × 五档 35 用例)
 

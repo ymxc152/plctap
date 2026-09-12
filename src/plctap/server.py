@@ -8,6 +8,7 @@ MCP 协议层永远是 Server; 工业协议层只做 Client/主站 (第 9 节)�
 from __future__ import annotations
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from plctap.config import PlctapConfig
 from plctap.conn.manager import ConnectionPool
@@ -42,6 +43,18 @@ from plctap.protocols.detect import DetectResult, DeviceDetector
 from plctap.listener import ListenerRegistry
 from plctap.proxy import ProxyRegistry
 from plctap.safety import AuditLog
+
+# 工具 annotations hint 分组 (MCP 规范: 均为 hint, 供客户端判断只读/并行安全性)。
+# 新工具注册时必须从以下四组选一, 黄金值逐工具锁定在 tests/test_tool_annotations.py
+# (改任何 hint 值 = 元数据 wire 变化, 须同步黄金表并在 Release notes 标注)。
+_ANN_PARSE = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+_ANN_NET_READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+_ANN_LIFECYCLE = ToolAnnotations(
+    read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True
+)
+_ANN_WRITE = ToolAnnotations(
+    read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=True
+)
 
 _INSTRUCTIONS = (
     "plctap 是 Agent 的 PLC 驱动层 (Modbus TCP/RTU、FINS、MELSEC、S7comm、"
@@ -96,7 +109,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     # ------------------------------------------------------------ 能力自述
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_PARSE)
     def list_protocols() -> ListProtocolsResult:
         """列出本 server 支持的工业协议及其能力。
 
@@ -137,7 +150,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     # ------------------------------------------------------------ 连接层
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_NET_READ)
     async def probe_device(
         protocol: str,
         host: str,
@@ -158,7 +171,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             Target(protocol=protocol, host=host, port=port, unit=unit)
         )
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_NET_READ)
     async def plc_read(
         protocol: str,
         host: str,
@@ -204,7 +217,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             result.interpretations = interpret_all(result.raw_registers)
         return result
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_NET_READ)
     async def plc_browse(
         protocol: str,
         host: str,
@@ -244,7 +257,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     # ------------------------------------------------------------ 诊断层
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_NET_READ)
     async def diagnose(
         protocol: str,
         frame_hex: str | None = None,
@@ -253,7 +266,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         port: int | None = None,
         unit: int = 1,
     ) -> DiagnosticReport:
-        """综合观测给出结构化的故障候选结论 (确定性规则, 不编故事)。
+        """综合观测给出结构化的故障候选结论 (确定性规则, 不编故事; 全程只读)。
 
         三种证据可任意组合 (至少给一种):
         - frame_hex: 一帧报文 hex (解析 + 校验 + 规则匹配)
@@ -284,7 +297,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
         # modbus_rtu 帧与 modbus 同轨 (RTU 双轨判别), 知识库共用
         return run_diagnosis(_norm_frame_protocol(protocol), frames_hex=frames_hex, log_snippet=log_snippet, probe_result=probe_result)
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_PARSE)
     async def parse_frame(
         protocol: str, frame_hex: str, direction: str = "auto",
         frame_format: str = "3e_binary",
@@ -364,7 +377,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             )
         raise ValueError(f"parse_frame not implemented for {protocol!r} yet")
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_PARSE)
     async def validate_frame(
         protocol: str, frame_hex: str, direction: str = "resp",
         frame_format: str = "3e_binary",
@@ -406,7 +419,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     # ------------------------------------------------------------ 报文证据: pcap
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_PARSE)
     async def parse_pcap(path: str, protocol: str | None = None) -> list[PcapFlow]:
         """解析 Wireshark 导出 pcap: 按 TCP 流聚合载荷 -> 按协议切帧 -> 逐帧 parse_auto。
 
@@ -424,7 +437,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     # ------------------------------------------------------------ 钓鱼模式监听
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_LIFECYCLE)
     async def start_listener(
         protocol: str,
         host: str = "0.0.0.0",
@@ -449,12 +462,12 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             **await listeners.start(protocol, host, port, mode, idle_timeout_sec, faults)
         )
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_LIFECYCLE)
     async def stop_listener(port: int) -> ListenerStopResult:
         """停掉指定端口的监听, 返回收/发帧统计。"""
         return ListenerStopResult(**await listeners.stop(port))
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_NET_READ)
     async def get_listener_frames(port: int, limit: int = 100) -> list[FrameRecord]:
         """取监听收下的帧 (direction/peer/frame_hex), 供 parse_frame/diagnose 分析。
 
@@ -465,7 +478,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     # ------------------------------------------------------------ 透明代理
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_LIFECYCLE)
     async def start_proxy(
         protocol: str,
         target_host: str,
@@ -487,12 +500,12 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
             )
         )
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_LIFECYCLE)
     async def stop_proxy(port: int) -> ProxyStopResult:
         """停掉指定端口的代理, 返回录制统计 (c2s/s2c 帧数)。"""
         return ProxyStopResult(**await proxies.stop(port))
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_NET_READ)
     async def get_proxy_frames(port: int, limit: int = 100) -> list[FrameRecord]:
         """取代理录制的双向透传帧 (direction: c2s=上位机→PLC, s2c=PLC→上位机)。
 
@@ -503,7 +516,7 @@ def create_app(config: PlctapConfig | None = None) -> FastMCP:
 
     # ------------------------------------------------------------ 设备自动识别
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_NET_READ)
     async def detect_device(
         host: str,
         ports: list[int] | None = None,
@@ -543,7 +556,7 @@ def _register_write_tools(
 ) -> None:
     """写类工具 (M3): 仅 allow_write=true 时注册, 每次调用写审计日志。"""
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_WRITE)
     async def plc_write(
         protocol: str,
         host: str,
@@ -619,7 +632,7 @@ def _register_write_tools(
         )
         return WriteResult(**d)
 
-    @mcp.tool
+    @mcp.tool(annotations=_ANN_WRITE)
     async def send_frame(
         protocol: str,
         host: str,

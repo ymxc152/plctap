@@ -177,6 +177,8 @@ from plctap.protocols.your_protocol.adapter import YourAdapter  # noqa: F401
 - [ ] `plc_read(protocol="your_protocol", ...)` 能正确读取
 - [ ] `parse_frame(protocol="your_protocol", ...)` 能正确解析
 - [ ] `diagnose(protocol="your_protocol", ...)` 能命中 KB 条目
+- [ ] 新工具声明 `ToolAnnotations`（server.py `_ANN_*` 四分组选一）并在
+  `tests/test_tool_annotations.py` 登记黄金值
 
 ## 返回建模约定（v0.6.1 稳定化起强制）
 
@@ -186,3 +188,11 @@ from plctap.protocols.your_protocol.adapter import YourAdapter  # noqa: F401
   字面量锁死，`model_dump()` 必须与之逐键一致。
 - 与既有同族工具共用模型（如新帧式协议沿用既有返回形态）时免新增, 但不得改动
   既有模型字段——字段名/键的任何变化都是 wire 变化, 需在 Release notes 标注。
+
+## 工具 annotations 约定（同步强制）
+
+- 新工具注册时必须声明 `ToolAnnotations`，从 server.py 的 `_ANN_*` 四分组选一
+  （纯本地解析 / 联网只读 / 监听代理生命周期 / 写），不得裸 `@mcp.tool`。
+- 在 `tests/test_tool_annotations.py` 登记黄金值：注册集合与黄金键集合双向锁定
+  （wire 为 camelCase, `model_dump(by_alias=True, exclude_none=True)` 逐键一致），
+  新工具不登记即挂测试；改既有 hint 值 = 元数据 wire 变化，需在 Release notes 标注。

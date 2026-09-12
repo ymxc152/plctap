@@ -32,6 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp>=2.0",
+    "mcp>=2.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "asyncua>=2.0",
