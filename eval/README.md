@@ -22,10 +22,11 @@
 # 工具模式 (本仓库, 无外部依赖)
 uv run python eval/benchmark.py
 
-# 裸模式
+# 裸模式 (三个环境变量均必需, 不内置任何厂商端点/默认模型)
 uv run python eval/benchmark.py --export-prompts eval/prompts.jsonl
-export OPENAI_API_KEY=...                       # 必需
-export PLCTAP_BASELINE_MODEL=gpt-4.1-mini      # 基线模型, 唯一需要披露的变量
+export PLCTAP_BASELINE_API_KEY=...             # 鉴权 key
+export PLCTAP_BASELINE_BASE_URL=...            # /responses 兼容端点基址
+export PLCTAP_BASELINE_MODEL=...               # 基线模型, 唯一需要披露的变量
 uv run python eval/baseline.py                 # 在线调用 (stdlib, 1s 限速)
 # 或离线: 手动收集答案后
 uv run python eval/baseline.py --answers answers.jsonl

@@ -215,8 +215,10 @@ semantics and multi-fault mixed scenarios** — exactly where deterministic pars
 live. Methodology and re-run steps: [eval/README.md](eval/README.md).
 
 **Runtime boundary**: `eval/` is a development-time benchmark harness (bare-model baseline comparison)
-that needs `OPENAI_API_KEY` only when re-running evaluations; the published wheel ships only `src/plctap`
-— the MCP server runtime has zero AI/LLM dependency and never reads or requires any model-API credential.
+that needs `PLCTAP_`-prefixed environment variables only when re-running evaluations (key, endpoint, and
+model are all provided explicitly; the repo embeds no vendor endpoint); the published wheel ships only
+`src/plctap` — the MCP server runtime has zero AI/LLM dependency and never reads or requires any
+model-API credential.
 
 ## Multi-model bare-baseline matrix (2026-09-08: 4 models × dual run × five tiers, 35 cases)
 

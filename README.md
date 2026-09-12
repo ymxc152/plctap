@@ -207,7 +207,8 @@ iec104 端点 / enip 端点 / opcua 端点) 未纳入基线。detect 档 (4 用�
 这正是确定性解析 + 结构化知识库的所在。方法学与复跑步骤见 [eval/README.md](eval/README.md)。
 
 **运行时边界**: `eval/` 是开发期基准测试 harness (裸模型基线对比), 仅复跑评测时需要
-`OPENAI_API_KEY`; 发布产物只含 `src/plctap` —— MCP server 运行时零 AI/LLM 依赖,
+`PLCTAP_` 前缀环境变量 (key/端点/模型全部显式提供, 仓库不内置任何厂商端点);
+发布产物只含 `src/plctap` —— MCP server 运行时零 AI/LLM 依赖,
 不读也不需要任何模型 API 凭据。
 
 ## 多模型裸基线矩阵 (2026-09-08: 4 模型 × 双跑 × 五档 35 用例)

@@ -4,7 +4,8 @@
 流程:
   1) uv run python eval/benchmark.py --export-prompts eval/prompts.jsonl
   2) uv run python eval/baseline.py --prompts eval/prompts.jsonl
-       - 需要环境变量 OPENAI_API_KEY; 模型用 PLCTAP_BASELINE_MODEL (默认 gpt-4.1-mini)
+       - 需要环境变量 PLCTAP_BASELINE_API_KEY / PLCTAP_BASELINE_BASE_URL /
+         PLCTAP_BASELINE_MODEL (均必需, 不内置任何厂商端点与默认模型)
        - 无 key 时可用 --answers <jsonl> 离线判分 (answer 字段 = 模型原始输出)
   3) 输出分档准确率 + eval/results_baseline.json (README 对比表数据源)
 
@@ -74,15 +75,18 @@ def parse_model_output(raw: str) -> list[dict[str, Any]] | None:
 def call_model(prompt: str, model: str, timeout: int = 180) -> str:
     """Responses API (stdlib 调用, 不引入依赖)。
 
-    支持 OpenAI 官方或任意兼容端点:
-      PLCTAP_BASELINE_BASE_URL  默认 https://api.openai.com/v1
-      OPENAI_API_KEY            鉴权 key
+    任意 /responses 兼容端点, 三个环境变量均必需 (不内置厂商默认):
+      PLCTAP_BASELINE_API_KEY     鉴权 key
+      PLCTAP_BASELINE_BASE_URL    API 基址 (不含 /responses 后缀)
+      PLCTAP_BASELINE_MODEL       模型 ID
     部分兼容端点不接受 temperature —— 400 时自动去参重试。
     """
-    key = os.environ.get("OPENAI_API_KEY")
+    key = os.environ.get("PLCTAP_BASELINE_API_KEY")
     if not key:
-        raise SystemExit("OPENAI_API_KEY not set")
-    base = os.environ.get("PLCTAP_BASELINE_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        raise SystemExit("PLCTAP_BASELINE_API_KEY not set")
+    base = (os.environ.get("PLCTAP_BASELINE_BASE_URL") or "").rstrip("/")
+    if not base:
+        raise SystemExit("PLCTAP_BASELINE_BASE_URL not set")
     url = f"{base}/responses"
 
     def _post(body_dict: dict[str, Any]) -> dict[str, Any]:
@@ -142,8 +146,11 @@ def main() -> int:
                 answers[rec["id"]] = rec["raw"]
         print(f"offline mode: {len(answers)} pre-recorded answers")
     else:
-        model = os.environ.get("PLCTAP_BASELINE_MODEL", "gpt-4.1-mini")
-        print(f"baseline model: {model} @ {os.environ.get('PLCTAP_BASELINE_BASE_URL', 'https://api.openai.com/v1')}")
+        model = os.environ.get("PLCTAP_BASELINE_MODEL")
+        base = os.environ.get("PLCTAP_BASELINE_BASE_URL")
+        if not (model and base):
+            raise SystemExit("PLCTAP_BASELINE_MODEL / PLCTAP_BASELINE_BASE_URL not set")
+        print(f"baseline model: {model} @ {base}")
         for rec in records:
             if rec["id"] in answers:
                 continue
