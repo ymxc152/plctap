@@ -45,10 +45,16 @@ from plctap.proxy import ProxyRegistry
 from plctap.safety import AuditLog
 
 # 工具 annotations hint 分组 (MCP 规范: 均为 hint, 供客户端判断只读/并行安全性)。
-# 新工具注册时必须从以下四组选一, 黄金值逐工具锁定在 tests/test_tool_annotations.py
+# 四项全显式: 目录站/OpenAI directory 对缺任一 hint 的工具拒收, 只读组也不依赖
+# 规范缺省 (destructive=true/idempotent=false)。新工具注册时必须从以下四组选一,
+# 黄金值逐工具锁定在 tests/test_tool_annotations.py
 # (改任何 hint 值 = 元数据 wire 变化, 须同步黄金表并在 Release notes 标注)。
-_ANN_PARSE = ToolAnnotations(read_only_hint=True, open_world_hint=False)
-_ANN_NET_READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
+_ANN_PARSE = ToolAnnotations(
+    read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+)
+_ANN_NET_READ = ToolAnnotations(
+    read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True
+)
 _ANN_LIFECYCLE = ToolAnnotations(
     read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True
 )

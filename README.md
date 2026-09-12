@@ -236,6 +236,9 @@ iec104 端点 / enip 端点 / opcua 端点) 未纳入基线。detect 档 (4 用�
 - **向后兼容**: MCP 工具名、参数名与各工具的返回结构保持兼容。返回结构由 pydantic 模型
   定义并锁定 (`tests/test_tool_shapes.py` 黄金校验; 例外: list_protocols 的 protocols
   条目为自由形态 dict); 新增协议端点、新增工具、新增可选参数只增不改。
+- **工具 annotations**: 17 个工具的 readOnlyHint/destructiveHint/idempotentHint/openWorldHint
+  四项全显式 (server.py `_ANN_*` 四分组), 黄金值锁定于 `tests/test_tool_annotations.py`;
+  annotations 属只增元数据, 任何取值变化按 wire 变化对待。
 - **破坏性变更**: 若不可避免, 在工具 docstring、本 README 与 Release notes 三处提前标注,
   并尽量提供迁移期。
 - **不承诺面**: `src/plctap` 内部模块组织、诊断知识库条目数、评测数字随版本正常演进。

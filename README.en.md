@@ -249,6 +249,10 @@ Stability discipline applies from v0.6.1 on:
   compatible. Response shapes are defined and locked by pydantic models
   (`tests/test_tool_shapes.py` golden checks; exception: the `protocols` entries of list_protocols
   remain free-form dicts); new protocol endpoints, new tools, and new optional parameters are additive only.
+- **Tool annotations**: all four hints (readOnlyHint/destructiveHint/idempotentHint/openWorldHint) are
+  declared explicitly on every tool (the `_ANN_*` groups in server.py), golden-locked in
+  `tests/test_tool_annotations.py`; annotations are additive metadata, and any value change counts
+  as a wire change.
 - **Breaking changes**: if unavoidable, they are flagged in advance in the tool docstring, this README,
   and the Release notes, with a migration window where feasible.
 - **Not covered**: internal module layout of `src/plctap`, diagnostic knowledge-base entry counts, and
